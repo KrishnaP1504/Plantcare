@@ -1,0 +1,57 @@
+# Miscellaneous
+*.class
+*.log
+*.pyc
+*.swp
+.DS_Store
+.atom/
+.buildlog/
+.history
+.svn/
+.cursor/
+
+# IntelliJ / Android Studio related
+*.iml
+*.ipr
+*.iws
+.idea/
+
+# VS Code related
+.vscode/
+
+# Flutter/Dart/Pub related
+**/doc/api/
+**/ios/Flutter/.last_build_id
+.dart_tool/
+.flutter-plugins
+.flutter-plugins-dependencies
+.packages
+.pub-cache/
+.pub/
+/build/
+
+# Android related (Ignores heavy auto-generated files, keeps your custom code)
+**/android/**/gradle-wrapper.jar
+**/android/.gradle
+**/android/captures/
+**/android/gradlew
+**/android/gradlew.bat
+**/android/local.properties
+**/android/**/GeneratedPluginRegistrant.java
+
+# =================================================================
+# ⚠️ SECURITY: Never upload API keys or Firebase configs to GitHub
+# =================================================================
+google-services.json
+GoogleService-Info.plist
+*.env
+
+# =================================================================
+# AS REQUESTED: Ignore unused platforms and test folders
+# =================================================================
+/ios/
+/linux/
+/macos/
+/web/
+/windows/
+/test/
