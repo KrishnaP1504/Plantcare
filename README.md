@@ -1,6 +1,6 @@
 <div align="center">
 
-  # 🌿 Plantcare
+  # Plantcare
   ### AI-Powered Botanical Health, Disease Pathology & Garden Care Application
 
   [![Flutter](https://img.shields.io/badge/Flutter-3.x-02569B?logo=flutter&logoColor=white)](https://flutter.dev)
@@ -15,7 +15,7 @@
 
 ---
 
-## 📖 About Plantcare
+## About Plantcare
 
 **Plantcare** is a modern, production-ready Flutter mobile application designed to simplify plant ownership and agricultural plant protection. Utilizing advanced computer vision artificial intelligence (Plant.id v3 by Kindwise and Pl@ntNet API v2), Firebase Authentication, and Cloud Firestore NoSQL database, Plantcare allows users to scan plant leaves, identify species, diagnose diseases, obtain actionable treatment plans, and track watering schedules.
 
@@ -23,35 +23,35 @@
 
 ---
 
-## ✨ Key Features
+## Key Features
 
-* 🔍 **Instant AI Plant Identification**: Identify houseplants, trees, herbs, succulents, and crops from a single leaf photo.
-* 🩺 **Real Pathology & Disease Diagnosis Engine**: Accurately diagnoses fungal, bacterial, and pest diseases (Downy Mildew, Powdery Mildew, Black Spot, Rust, Anthracnose, Bacterial Blight, Root Rot, Chlorosis, Spider Mites) with step-by-step treatment action plans.
-* 🛡️ **Non-Plant Image Filter**: Automatically validates captured photos and prompts users (*"Please click a picture of a plant"*) if a non-plant object is scanned.
-* 🌐 **Global Plant Search**: Search any botanical species across the world from the dashboard and view detailed care requirements.
-* 🪴 **My Garden Collection**: Manage your personal indoor/outdoor garden synced in real-time to Firebase Cloud Firestore.
-* ⏰ **Smart Care Scheduling**: Track watering and fertilizer schedules to keep plants thriving.
-* 👤 **Account & Garden Customization**: Edit profile picture, display name, username, bio, garden name, and sorting options.
+* **Instant AI Plant Identification**: Identify houseplants, trees, herbs, succulents, and crops from a single leaf photo.
+* **Real Pathology & Disease Diagnosis Engine**: Accurately diagnoses fungal, bacterial, and pest diseases (Downy Mildew, Powdery Mildew, Black Spot, Rust, Anthracnose, Bacterial Blight, Root Rot, Chlorosis, Spider Mites) with step-by-step treatment action plans.
+* **Non-Plant Image Filter**: Automatically validates captured photos and prompts users (*"Please click a picture of a plant"*) if a non-plant object is scanned.
+* **Global Plant Search**: Search any botanical species across the world from the dashboard and view detailed care requirements.
+* **My Garden Collection**: Manage your personal indoor/outdoor garden synced in real-time to Firebase Cloud Firestore.
+* **Smart Care Scheduling**: Track watering and fertilizer schedules to keep plants thriving.
+* **Account & Garden Customization**: Edit profile picture, display name, username, bio, garden name, and sorting options.
 
 ---
 
-## 🎨 Design System & Color Palette
+## Design System & Color Palette
 
 Plantcare features a botanical-inspired **Dark Emerald & Cream** aesthetic with glassmorphic accents:
 
 | Token Name | Hex Code | Purpose |
 | :--- | :--- | :--- |
-| 🟢 **Primary Emerald** | `#1B4D3E` | Brand buttons, active tabs, header icons |
-| 🍦 **Soft Sage Cream** | `#FAFBF8` | Global background canvas |
-| 🌿 **Light Sage Fill** | `#EAF2EC` | Input fields, card backgrounds |
-| 🔴 **Pathology Warning Red** | `#DC2626` | Disease warning badges & alerts |
-| 🌸 **Warning Card Fill** | `#FEF2F2` | Pathology report card background |
-| ❇️ **Healthy Green** | `#16A34A` | Healthy status verification badge |
-| 🟡 **Amber Gold** | `#F59E0B` | Care task icons & match probability tags |
+| **Primary Emerald** | `#1B4D3E` | Brand buttons, active tabs, header icons |
+| **Soft Sage Cream** | `#FAFBF8` | Global background canvas |
+| **Light Sage Fill** | `#EAF2EC` | Input fields, card backgrounds |
+| **Pathology Warning Red** | `#DC2626` | Disease warning badges & alerts |
+| **Warning Card Fill** | `#FEF2F2` | Pathology report card background |
+| **Healthy Green** | `#16A34A` | Healthy status verification badge |
+| **Amber Gold** | `#F59E0B` | Care task icons & match probability tags |
 
 ---
 
-## 🛠 Tech Stack
+## Tech Stack
 
 * **Frontend Framework**: Flutter (Dart 3.x)
 * **State Management**: `provider` (MultiProvider architecture)
@@ -63,7 +63,7 @@ Plantcare features a botanical-inspired **Dark Emerald & Cream** aesthetic with 
 
 ---
 
-## 📁 Repository Structure
+## Repository Structure
 
 ```
 Plantcare/
@@ -86,7 +86,7 @@ Plantcare/
 
 ---
 
-## 🚀 Quick Setup & Installation
+## Quick Setup & Installation
 
 ### Prerequisites
 * [Flutter SDK](https://docs.flutter.dev/get-started/install) (v3.19.0 or higher)
@@ -130,11 +130,11 @@ flutter run
 
 ---
 
-## 📄 License
+## License
 This project is open-source and available under the [MIT License](LICENSE).
 
 ---
 
 <div align="center">
-  <sub>Built with ❤️ for plant lovers and agricultural tech worldwide.</sub>
+  <sub>Built for plant lovers and agricultural tech worldwide.</sub>
 </div>

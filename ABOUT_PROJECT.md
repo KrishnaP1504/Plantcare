@@ -1,23 +1,23 @@
-# 🌿 Plantcare - AI-Powered Botanical Health & Garden Management
+# Plantcare - AI-Powered Botanical Health & Garden Management
 
 **Plantcare** is a modern, production-grade Flutter application designed for real-time plant identification, disease pathology diagnosis, personalized plant care scheduling, and garden management. Powered by advanced artificial intelligence (Plant.id v3 by Kindwise & Pl@ntNet API v2), Firebase Authentication, Cloud Firestore, and custom computer vision algorithms, Plantcare provides plant enthusiasts with accurate botanical identification and actionable treatment plans for agricultural and houseplant diseases.
 
 ---
 
-## 📌 Table of Contents
-1. [Tech Stack & Dependencies](#-tech-stack--dependencies)
-2. [Project Architecture & Design Patterns](#-project-architecture--design-patterns)
-3. [Directory & File Structure](#-directory--file-structure)
-4. [Authentication & Database System](#-authentication--database-system)
-5. [API Integrations & Pathology Engine](#-api-integrations--pathology-engine)
-6. [Design System, Theme & Color Palette](#-design-system-theme--color-palette)
-7. [App Walkthrough & Screen-by-Screen Flow](#-app-walkthrough--screen-by-screen-flow)
-8. [Technical Challenges Faced & Solutions Implemented](#-technical-challenges-faced--solutions-implemented)
-9. [Installation & Setup Guide](#-installation--setup-guide)
+## Table of Contents
+1. [Tech Stack & Dependencies](#tech-stack--dependencies)
+2. [Project Architecture & Design Patterns](#project-architecture--design-patterns)
+3. [Directory & File Structure](#directory--file-structure)
+4. [Authentication & Database System](#authentication--database-system)
+5. [API Integrations & Pathology Engine](#api-integrations--pathology-engine)
+6. [Design System, Theme & Color Palette](#design-system-theme--color-palette)
+7. [App Walkthrough & Screen-by-Screen Flow](#app-walkthrough--screen-by-screen-flow)
+8. [Technical Challenges Faced & Solutions Implemented](#technical-challenges-faced--solutions-implemented)
+9. [Installation & Setup Guide](#installation--setup-guide)
 
 ---
 
-## 🛠 Tech Stack & Dependencies
+## Tech Stack & Dependencies
 
 ### Core Framework & State Management
 * **Flutter SDK**: 3.x+ (Dart 3.x)
@@ -39,7 +39,7 @@
 
 ---
 
-## 🏗 Project Architecture & Design Patterns
+## Project Architecture & Design Patterns
 
 Plantcare follows a clean, modular **Layered Provider Architecture**:
 
@@ -72,7 +72,7 @@ Plantcare follows a clean, modular **Layered Provider Architecture**:
 
 ---
 
-## 📂 Directory & File Structure
+## Directory & File Structure
 
 ```
 Plantcare/
@@ -151,7 +151,7 @@ Plantcare/
 
 ---
 
-## 🔐 Authentication & Database System
+## Authentication & Database System
 
 ### 1. Firebase Authentication (`AuthService`)
 * **Email & Password Authentication**: Enables secure registration and login with input validation.
@@ -169,7 +169,7 @@ All application data is synced in real-time with Google Cloud Firestore:
   "displayName": "Alex Gardener",
   "username": "alex_plants",
   "photoUrl": "https://firestore.storage/profile.jpg",
-  "bio": "Urban jungle collector and indoor plant lover 🌱",
+  "bio": "Urban jungle collector and indoor plant lover",
   "gardenName": "Alex's Urban Oasis",
   "defaultGarden": "Indoor Living Room",
   "plantSorting": "Recently Added",
@@ -197,7 +197,7 @@ All application data is synced in real-time with Google Cloud Firestore:
 
 ---
 
-## 🌐 API Integrations & Pathology Engine
+## API Integrations & Pathology Engine
 
 ### 1. External APIs Used (Placeholders)
 The application connects to external botanical intelligence endpoints configured in `.env`:
@@ -240,9 +240,9 @@ When a user takes or uploads a photo via `CameraScreen`:
      │ Health Probability Check                                   │
      ├────────────────────────────────────────────────────────────┤
      │ is_healthy.probability < 0.60                              │
-     │ ➔ Parse Real Diseases, Pathogen About Text & Action Plan  │
+     │ -> Parse Real Diseases, Pathogen About Text & Action Plan  │
      │ is_healthy.probability >= 0.60                             │
-     │ ➔ Return Healthy Status ("No Diseases Detected 🌱")         │
+     │ -> Return Healthy Status ("No Diseases Detected")          │
      └────────────────────────────────────────────────────────────┘
 ```
 
@@ -259,7 +259,7 @@ When a user takes or uploads a photo via `CameraScreen`:
 
 ---
 
-## 🎨 Design System, Theme & Color Palette
+## Design System, Theme & Color Palette
 
 Plantcare follows a modern, botanical-inspired **Dark Emerald & Cream Design System** featuring subtle glassmorphic elements and curated color tokens:
 
@@ -281,7 +281,7 @@ Plantcare follows a modern, botanical-inspired **Dark Emerald & Cream Design Sys
 
 ---
 
-## 📱 App Walkthrough & Screen-by-Screen Flow
+## App Walkthrough & Screen-by-Screen Flow
 
 ### 1. Splash & Onboarding (`/splash`, `/onboarding`)
 * **Splash Screen**: Animated logo reveal with smooth transition checking auth status.
@@ -292,8 +292,8 @@ Plantcare follows a modern, botanical-inspired **Dark Emerald & Cream Design Sys
 * Form validation for email/password and single-tap Google OAuth sign-in.
 
 ### 3. Dashboard / Home (`/dashboard`, `/home`)
-* **Small Greeting**: Displays compact welcome message with the user's `@username` (e.g., *"Hello, @alex_plants 👋"*).
-* **Global Plant Search Bar**: Allows searching any plant species in the world. Clicking the **Go `→` button** fetches real-time data and opens `PlantDetailScreen` with `isGlobal=true` (hiding "Add to Garden" and "Diagnose" action buttons as requested).
+* **Small Greeting**: Displays compact welcome message with the user's `@username` (e.g., *"Hello, @alex_plants"*).
+* **Global Plant Search Bar**: Allows searching any plant species in the world. Clicking the **Go button** fetches real-time data and opens `PlantDetailScreen` with `isGlobal=true` (hiding "Add to Garden" and "Diagnose" action buttons).
 * **My Garden Preview**: Shows 3 featured user plants with direct links to full garden management.
 * **Diagnose Card**: Quick entry point to scan leaves for diseases.
 
@@ -304,7 +304,7 @@ Plantcare follows a modern, botanical-inspired **Dark Emerald & Cream Design Sys
 ### 5. Pathology Scan Result (`/scan-result`)
 * Displays identified plant species name, scientific name, and species confidence match.
 * **Disease Detected State**: Renders a red pathology warning card (`#FEF2F2`) with a flexible warning pill badge (`#DC2626`) showing title-cased disease name (e.g. `Nutrient Deficiency Detected • 88% Match`), **About Pathogen** explanation, and bulleted **Treatment & Action Plan**.
-* **Healthy State**: Renders a green verification card (`#F0FDF4`) displaying **No Diseases Detected 🌱**.
+* **Healthy State**: Renders a green verification card (`#F0FDF4`) displaying **No Diseases Detected**.
 
 ### 6. My Garden (`/garden`)
 * Grid/List view of all user's saved plants with category filters and sorting options.
@@ -316,7 +316,7 @@ Plantcare follows a modern, botanical-inspired **Dark Emerald & Cream Design Sys
 
 ---
 
-## 🛠 Technical Challenges Faced & Solutions Implemented
+## Technical Challenges Faced & Solutions Implemented
 
 ### 1. Challenge: Plant.id v3 returning `Unknown Plant` with `95% Confidence`
 * **Root Cause**: The API payload missing explicit `details` query parameters caused the classification object to return without common names, defaulting to `Unknown Plant` while hardcoding a high confidence score.
@@ -336,7 +336,7 @@ Plantcare follows a modern, botanical-inspired **Dark Emerald & Cream Design Sys
 
 ---
 
-## 🚀 Installation & Setup Guide
+## Installation & Setup Guide
 
 ### Prerequisites
 * Flutter SDK (v3.19.0 or higher)
@@ -344,8 +344,8 @@ Plantcare follows a modern, botanical-inspired **Dark Emerald & Cream Design Sys
 
 ### Step 1: Clone the Repository
 ```bash
-git clone https://github.com/your-username/plantcare.git
-cd plantcare
+git clone https://github.com/KrishnaP1504/Plantcare.git
+cd Plantcare
 ```
 
 ### Step 2: Configure Environment Variables
@@ -374,4 +374,4 @@ flutter run
 ```
 
 ---
-*Created with ❤️ for botanical enthusiasts and plant lovers worldwide.* 🌿
+*Created for botanical enthusiasts and plant lovers worldwide.*
