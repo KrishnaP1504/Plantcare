@@ -1,0 +1,70 @@
+name: plantcare
+description: "AI-powered plant care and identification app"
+publish_to: 'none'
+version: 0.1.0+1
+
+environment:
+  sdk: ^3.12.2
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+  # Environment Variables
+  flutter_dotenv: ^5.2.1
+
+  # Firebase Core, Auth, Firestore
+  firebase_core: ^3.12.0
+  firebase_auth: ^5.5.1
+  cloud_firestore: ^5.6.5
+
+  # State Management
+  provider: ^6.1.2
+
+  # Navigation
+  go_router: ^16.0.0
+
+  # Google Sign-In
+  google_sign_in: ^6.2.2
+
+  # Camera
+  camera: ^0.12.0+2
+
+  # Runtime Permissions
+  permission_handler: ^11.3.1
+
+  # SVG Support
+  flutter_svg: ^2.0.17
+
+  # Icons
+  iconsax_flutter: ^1.0.0+1
+
+  # Image caching
+  cached_network_image: ^3.4.1
+
+  # Google Fonts
+  google_fonts: ^6.2.1
+
+  # Networking
+  http: ^1.2.0
+
+  # Onboarding persistence (non-sensitive flags only)
+  shared_preferences: ^2.3.5
+
+  # Secure token storage (Keychain/Keystore)
+  flutter_secure_storage: ^9.2.4
+
+  # Image processing (EXIF stripping)
+  image: ^4.5.3
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^6.0.0
+  mocktail: ^1.0.4
+
+flutter:
+  uses-material-design: true
+  assets:
+    - .env
+    - assets/images/

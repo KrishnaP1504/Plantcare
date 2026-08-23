@@ -1,0 +1,54 @@
+{
+  "project_info": {
+    "project_number": "464583911861",
+    "project_id": "plantcare-kp1504",
+    "storage_bucket": "plantcare-kp1504.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:464583911861:android:33b885601f097461d611fc",
+        "android_client_info": {
+          "package_name": "com.plantcare.plantcare"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "464583911861-0dknscoeljvdog0fm1gbsn0icjsgcl6b.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.plantcare.plantcare",
+            "certificate_hash": "69489823f5e73a0fa9f800efbe70f9381a21e0ba"
+          }
+        },
+        {
+          "client_id": "464583911861-ql3tu7pfeikmdvhmvbe5j0kjimoslm8v.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyA1D5fOQXI4UWYpwnO6cHB5B6yC2HFvENk"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "464583911861-ql3tu7pfeikmdvhmvbe5j0kjimoslm8v.apps.googleusercontent.com",
+              "client_type": 3
+            },
+            {
+              "client_id": "464583911861-vp9ocpc6ufcgkprfva6in7ih65bkvrrc.apps.googleusercontent.com",
+              "client_type": 2,
+              "ios_info": {
+                "bundle_id": "com.plantcare.plantcare"
+              }
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
