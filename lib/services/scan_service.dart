@@ -46,7 +46,7 @@ bool _isValidPlantName(String? name) {
 /// Plant.id (Kindwise) API v3, and Pl@ntNet API.
 ///
 /// Disease detection is FULLY DYNAMIC — only the AI models decide if a plant is diseased.
-/// There is NO static/hardcoded/pixel-based disease assignment anywhere in this service.
+/// Accurately detects pathogens on leaves, fruits, berries, stems, and flowers.
 class ScanService {
   Future<DiagnosisModel> identify({
     required Uint8List imageBytes,
@@ -101,7 +101,7 @@ class ScanService {
 
     // ── 4. All APIs failed ──
     throw const NotAPlantException(
-      'Could not identify this plant. Please try again with a clearer photo showing the full leaf or flower.',
+      'Could not identify this plant. Please try again with a clearer photo showing the full leaf, fruit, or flower.',
     );
   }
 
@@ -122,38 +122,51 @@ class ScanService {
             "parts": [
               {
                 "text": """
-You are an expert botanist and plant pathologist. Identify the exact species in this photo.
+You are an expert botanical species classifier and agricultural plant pathologist.
+Analyze this photo carefully.
 
-RULES:
-1. You MUST return the real species name. For example: "Coleus", "Tulsi", "Monstera", "Rose", "Tomato", "Mango", "Neem", "Basil", etc.
-   NEVER return generic words like "Plant", "Leaf", "Flower", "Tree", or "Unknown".
-2. Accept photos of any plant part: leaf, flower, fruit, stem, bark, or whole plant.
-3. ONLY set "is_plant" to false if the image contains NO plant at all (e.g. a car, shoe, person).
-4. For "confidence", return YOUR actual certainty as a decimal (0.30 to 0.99). Do NOT default to 0.95.
-5. For "description", write 2-3 sentences about the plant's characteristics, origin, and common uses.
+IDENTIFICATION RULES:
+1. Identify the exact plant species from the photo. Return the common name (e.g. "Tomato", "Coleus", "Tulsi", "Rose", "Mango", "Potato", "Chili Pepper", "Eggplant", "Neem", "Monstera") and scientific name.
+2. Accept photos of any plant part: leaves, fruits, berries, seed pods, flowers, stems, branches, bark, or whole plants.
+3. ONLY set "is_plant" to false if the image contains NO botanical material (e.g., cars, shoes, electronics, people).
+4. Provide a dynamic visual confidence score (decimal between 0.40 and 0.99).
+5. Write a rich, 2-3 sentence description of the plant species.
 
-CRITICAL DISEASE DETECTION RULES:
-6. ONLY report diseases if you can clearly see visible symptoms in the image such as:
-   - Brown/black spots or lesions on leaves
-   - White powdery coating on leaf surfaces
-   - Yellow mosaic patterns or chlorosis
-   - Wilting, curling, or deformed leaves
-   - Mold, mildew, or fungal growth
-   - Pest damage (holes, webbing, insects)
-   - Rust-colored pustules
-7. If the plant looks healthy with normal green/colored foliage and NO visible disease symptoms, you MUST set "is_healthy" to true and return an EMPTY diseases array [].
-8. Do NOT guess or assume diseases. Only report what you can actually SEE in the image.
-9. Natural leaf coloring (red, purple, pink variegation in ornamental plants like Coleus) is NOT a disease.
+COMPREHENSIVE PATHOLOGY & DISEASE DETECTION RULES:
+6. Carefully inspect ALL parts of the plant in the photo:
+   - FRUITS/BERRIES: Look for brown/black sunken rot spots, mold growth, concentric ring lesions, leathery patches, blossom end rot, Late Blight (Phytophthora infestans), Anthracnose, Buckeye rot, or soft rot.
+   - LEAVES/FOLIAGE: Look for fungal spots, chlorosis (yellowing), powdery mildew, downy mildew, leaf curl, blights, necrosis, or pest webbing.
+   - STEMS/VINES: Look for dark lesions, cankers, wilting, or vascular browning.
+7. IF ANY DISEASE OR PEST DAMAGE IS DETECTED ON FRUITS, LEAVES, OR STEMS:
+   - Set "is_healthy": false
+   - Name the exact disease (e.g. "Tomato Late Blight", "Fruit Rot (Anthracnose)", "Blossom End Rot", "Early Blight", "Powdery Mildew", "Bacterial Spot")
+   - Provide a detailed "About Pathogen" description explaining the cause and symptoms
+   - Provide 3-5 specific, practical, actionable treatment and prevention steps (cultural practices, organic fungicides like copper/neem, watering adjustments, pruning infected fruit/leaves)
+8. IF THE PLANT IS HEALTHY (vibrant foliage/fruit, no rot, no lesions, no mold, no pests):
+   - Set "is_healthy": true
+   - Return an empty "diseases" array: []
+   - Note: Natural colored variegation (like red/purple in Coleus) is healthy, NOT a disease.
 
-Respond with ONLY this JSON:
+Format response strictly as valid JSON matching this schema:
 {
   "is_plant": true,
-  "plant_name": "Coleus",
-  "scientific_name": "Coleus scutellarioides",
-  "confidence": 0.87,
-  "description": "Coleus is a vibrant ornamental plant known for its colorful, variegated foliage in shades of red, green, pink, and yellow. Native to Southeast Asia, it is widely grown as a decorative houseplant and garden border.",
-  "is_healthy": true,
-  "diseases": []
+  "plant_name": "Common Plant Name",
+  "scientific_name": "Botanical Scientific Name",
+  "confidence": 0.92,
+  "description": "Rich botanical description of the species...",
+  "is_healthy": false,
+  "diseases": [
+    {
+      "name": "Disease Name",
+      "probability": 0.90,
+      "description": "Detailed description of pathogen cause, symptoms, and impact...",
+      "treatments": [
+        "Actionable treatment step 1",
+        "Actionable treatment step 2",
+        "Actionable treatment step 3"
+      ]
+    }
+  ]
 }
 """
               },
@@ -189,7 +202,7 @@ Respond with ONLY this JSON:
 
     final isPlant = parsed['is_plant'] as bool? ?? true;
     if (!isPlant) {
-      throw const NotAPlantException('This does not appear to be a plant. Please take a photo of a plant leaf, flower, or fruit.');
+      throw const NotAPlantException('This does not appear to be a plant. Please take a photo of a plant leaf, fruit, or flower.');
     }
 
     final plantName = parsed['plant_name'] as String?;
@@ -213,7 +226,7 @@ Respond with ONLY this JSON:
         diseases = diseaseList.map((d) {
           final dMap = d as Map<String, dynamic>;
           final name = dMap['name'] as String? ?? 'Plant Health Issue';
-          final prob = (dMap['probability'] as num?)?.toDouble() ?? 0.80;
+          final prob = (dMap['probability'] as num?)?.toDouble() ?? 0.85;
           final desc = dMap['description'] as String? ?? '';
           final treatments = (dMap['treatments'] as List<dynamic>?)
                   ?.map((t) => t.toString())
@@ -223,23 +236,32 @@ Respond with ONLY this JSON:
           return DiseaseResult(
             name: name,
             probability: prob,
-            description: desc.isNotEmpty ? desc : 'Disease detected by AI visual analysis.',
-            treatments: treatments.isNotEmpty ? treatments : const ['Consult a local plant nursery or agricultural extension for treatment advice.'],
+            description: desc.isNotEmpty ? desc : 'Disease detected by AI visual pathology analysis.',
+            treatments: treatments.isNotEmpty
+                ? treatments
+                : const [
+                    'Remove and dispose of severely infected plant parts to prevent spore spread.',
+                    'Apply an appropriate organic copper fungicide spray.',
+                    'Avoid overhead watering; water the soil at the base in early morning.',
+                  ],
           );
         }).toList();
       }
     }
 
+    final validPlantName = plantName!;
+    final validSciName = _isValidPlantName(scientificName) ? scientificName! : validPlantName;
+
     return DiagnosisModel(
       id: 'scan_${DateTime.now().millisecondsSinceEpoch}',
-      plantName: plantName!,
-      scientificName: _isValidPlantName(scientificName) ? scientificName! : plantName!,
+      plantName: validPlantName,
+      scientificName: validSciName,
       confidence: confidence,
       description: (description != null && description.length > 20)
           ? description
-          : _getPlantDescription(plantName!, scientificName ?? plantName!, null, null),
+          : _getPlantDescription(validPlantName, validSciName, null, null),
       diseases: diseases,
-      recommendations: _getSmartRecommendations(plantName!),
+      recommendations: _getSmartRecommendations(validPlantName),
       scannedAt: DateTime.now(),
     );
   }
@@ -326,13 +348,11 @@ Respond with ONLY this JSON:
         result?['diseases']) as List<dynamic>?;
 
     List<DiseaseResult> diseases = [];
-    // Only add diseases if the API's health probability says it's actually unhealthy
-    if (isHealthyProb < 0.50 && diseaseSuggestions != null && diseaseSuggestions.isNotEmpty) {
+    if (isHealthyProb < 0.60 && diseaseSuggestions != null && diseaseSuggestions.isNotEmpty) {
       diseases = diseaseSuggestions.where((d) {
         final dMap = d as Map<String, dynamic>;
         final dProb = (dMap['probability'] as num?)?.toDouble() ?? 0.0;
-        // Only include diseases with > 30% probability from the API
-        return dProb > 0.30;
+        return dProb > 0.25;
       }).map((d) {
         final dMap = d as Map<String, dynamic>;
         final dName = dMap['name'] as String? ?? 'Plant Disease';
@@ -426,25 +446,32 @@ Respond with ONLY this JSON:
 
     if (!_isValidPlantName(plantName)) return null;
 
-    // Pl@ntNet does NOT do disease detection — return empty diseases
     return DiagnosisModel(
       id: 'scan_${DateTime.now().millisecondsSinceEpoch}',
       plantName: plantName,
       scientificName: scientificName,
       confidence: score,
       description: _getPlantDescription(plantName, scientificName, commonNames, null),
-      diseases: const [], // No static diseases — Pl@ntNet only identifies species
+      diseases: const [],
       recommendations: _getSmartRecommendations(plantName),
       scannedAt: DateTime.now(),
     );
   }
 
   // ═══════════════════════════════════════════════════════════════════════════
-  // Helper Methods — NO static disease detection anywhere
+  // Helper Methods — Crop & Ornamental smart care recommendations
   // ═══════════════════════════════════════════════════════════════════════════
 
   static List<String> _getSmartRecommendations(String plantName) {
     final lower = plantName.toLowerCase();
+    if (lower.contains('tomato') || lower.contains('solanum lycopersicum')) {
+      return const [
+        'Water at soil level early in the morning to keep foliage dry.',
+        'Prune lower leaves that touch the soil to prevent soil-borne fungal spores.',
+        'Support heavy fruit trusses with stakes or cages to keep fruits off the ground.',
+        'Provide full sunlight (6-8 hours daily) and fertile, well-drained soil.',
+      ];
+    }
     if (lower.contains('coleus') || lower.contains('solenostemon')) {
       return const [
         'Provide bright, indirect light to maintain vivid leaf colors.',
@@ -489,6 +516,9 @@ Respond with ONLY this JSON:
     final nameLower = plantName.toLowerCase();
     final sciLower = scientificName.toLowerCase();
 
+    if (nameLower.contains('tomato') || sciLower.contains('solanum lycopersicum')) {
+      return 'Tomato (Solanum lycopersicum) is an edible berry of the nightshade family Solanaceae. Widely cultivated globally as a culinary staple, tomato plants thrive in warm, sunny conditions and produce nutrient-rich fruits loaded with lycopene and vitamin C.';
+    }
     if (nameLower.contains('coleus') || sciLower.contains('coleus') || sciLower.contains('solenostemon') || sciLower.contains('plectranthus scutellarioides')) {
       return 'Coleus is a vibrant ornamental plant prized for its strikingly colorful, variegated foliage in shades of red, green, pink, purple, and yellow. Native to Southeast Asia, it thrives in partial shade and is widely grown as a decorative houseplant and garden border.';
     }

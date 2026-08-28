@@ -1,8 +1,9 @@
-import 'dart:io';
+﻿import 'dart:io';
 import 'package:camera/camera.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
+import 'package:image_picker/image_picker.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:provider/provider.dart';
 import '../../core/constants/app_colors.dart';
@@ -18,6 +19,7 @@ import '../../widgets/custom_button.dart';
 /// Features:
 /// - Real-time camera preview using [CameraController]
 /// - Real photo capture via `controller.takePicture()`
+/// - Upload from gallery via [ImagePicker]
 /// - Handles 3 permission states: granted, denied, permanently denied
 /// - Debounce guard & loading overlay during scan
 class CameraScreen extends StatefulWidget {
@@ -36,6 +38,7 @@ class CameraScreen extends StatefulWidget {
 
 class _CameraScreenState extends State<CameraScreen> {
   final PermissionService _permissionService = PermissionService();
+  final ImagePicker _imagePicker = ImagePicker();
   CameraController? _controller;
   List<CameraDescription> _cameras = [];
   bool _hasPermission = false;
@@ -125,6 +128,7 @@ class _CameraScreenState extends State<CameraScreen> {
     }
   }
 
+  /// Handle camera capture
   Future<void> _handleCapture() async {
     final scanProvider = context.read<ScanProvider>();
     if (scanProvider.isScanning) return; // debounce guard
@@ -152,6 +156,42 @@ class _CameraScreenState extends State<CameraScreen> {
           '${tempDir.path}/captured_plant_${DateTime.now().millisecondsSinceEpoch}.jpg');
       await imageFile.writeAsBytes(Uint8List.fromList(List.generate(100, (i) => i)));
     }
+
+    await _processImage(imageFile);
+  }
+
+  /// Handle upload from gallery
+  Future<void> _handleGalleryUpload() async {
+    final scanProvider = context.read<ScanProvider>();
+    if (scanProvider.isScanning) return;
+
+    try {
+      final XFile? pickedFile = await _imagePicker.pickImage(
+        source: ImageSource.gallery,
+        maxWidth: 1920,
+        maxHeight: 1920,
+        imageQuality: 90,
+      );
+
+      if (pickedFile == null) return; // User cancelled
+
+      final imageFile = File(pickedFile.path);
+      await _processImage(imageFile);
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Failed to load image: $e'),
+            backgroundColor: AppColors.error,
+          ),
+        );
+      }
+    }
+  }
+
+  /// Process image file through scan provider
+  Future<void> _processImage(File imageFile) async {
+    final scanProvider = context.read<ScanProvider>();
 
     await scanProvider.scan(
       imageFile,
@@ -190,9 +230,10 @@ class _CameraScreenState extends State<CameraScreen> {
                 shape: BoxShape.circle,
               ),
               child: const Center(
-                child: Text(
-                  '🌿',
-                  style: TextStyle(fontSize: 36),
+                child: Icon(
+                  Icons.eco_outlined,
+                  size: 36,
+                  color: Color(0xFF2C553C),
                 ),
               ),
             ),
@@ -213,7 +254,7 @@ class _CameraScreenState extends State<CameraScreen> {
 
             // Subtitle / Body
             const Text(
-              'We couldn\'t detect a plant in your photo. Please take a clear picture of a plant or leaf.',
+              'We couldn\'t detect a plant in your photo. Please take a clear picture of a plant, leaf, flower, or fruit.',
               textAlign: TextAlign.center,
               style: TextStyle(
                 fontSize: 14,
@@ -238,7 +279,7 @@ class _CameraScreenState extends State<CameraScreen> {
                   foregroundColor: Colors.white,
                   elevation: 0,
                   shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(25),
+                    borderRadius: BorderRadius.circular(16),
                   ),
                 ),
                 child: const Text(
@@ -260,39 +301,48 @@ class _CameraScreenState extends State<CameraScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: Colors.black,
-      appBar: AppBar(
-        backgroundColor: Colors.black,
-        foregroundColor: Colors.white,
-        leading: IconButton(
-          icon: const Icon(Icons.close),
-          onPressed: () => context.pop(),
-        ),
-        title: Text(
-          widget.scanMode == ScanMode.identify
-              ? 'Scan Plant'
-              : 'Plant Diagnostics',
-          style: AppTextStyles.labelLarge.copyWith(color: Colors.white),
-        ),
+      body: Stack(
+        fit: StackFit.expand,
+        children: [
+          // Body content
+          if (_isCheckingPermission)
+            _buildLoadingState()
+          else if (_isPermanentlyDenied)
+            _buildPermanentlyDeniedState()
+          else if (!_hasPermission)
+            _buildDeniedState()
+          else
+            _buildCameraPreview(),
+
+          // Back button
+          Positioned(
+            top: MediaQuery.of(context).padding.top + 8,
+            left: 8,
+            child: IconButton(
+              icon: const Icon(Icons.arrow_back, color: Colors.white, size: 28),
+              onPressed: () => context.pop(),
+            ),
+          ),
+        ],
       ),
-      body: _isCheckingPermission
-          ? const Center(
-              child: CircularProgressIndicator(color: AppColors.primaryLight),
-            )
-          : _isPermanentlyDenied
-              ? _buildPermanentlyDeniedState()
-              : !_hasPermission
-                  ? _buildDeniedState()
-                  : _buildCameraView(),
     );
   }
 
-  /// Real-time camera preview with capture button.
-  Widget _buildCameraView() {
+  Widget _buildLoadingState() {
+    return const Center(
+      child: CircularProgressIndicator(
+        color: AppColors.primaryDark,
+      ),
+    );
+  }
+
+  Widget _buildCameraPreview() {
     return Stack(
+      fit: StackFit.expand,
       children: [
-        // Live camera preview or fallback viewfinder
-        if (_isCameraInitialized && _controller != null && _controller!.value.isInitialized)
-          SizedBox.expand(
+        // Camera preview
+        if (_isCameraInitialized && _controller != null)
+          Center(
             child: CameraPreview(_controller!),
           )
         else
@@ -301,22 +351,21 @@ class _CameraScreenState extends State<CameraScreen> {
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
                 if (_cameraError != null) ...[
-                  const Icon(
+                  Icon(
                     Icons.error_outline,
-                    size: 60,
-                    color: AppColors.error,
+                    size: 48,
+                    color: Colors.white.withValues(alpha: 0.5),
                   ),
                   const SizedBox(height: 16),
-                  Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 32),
-                    child: Text(
-                      _cameraError!,
-                      textAlign: TextAlign.center,
-                      style: AppTextStyles.bodyMedium.copyWith(color: Colors.white),
+                  Text(
+                    _cameraError!,
+                    style: AppTextStyles.bodyMedium.copyWith(
+                      color: Colors.white.withValues(alpha: 0.7),
                     ),
+                    textAlign: TextAlign.center,
                   ),
                 ] else ...[
-                  const CircularProgressIndicator(color: AppColors.primaryLight),
+                  const CircularProgressIndicator(color: Colors.white),
                   const SizedBox(height: 16),
                   Text(
                     'Initializing camera...',
@@ -361,7 +410,7 @@ class _CameraScreenState extends State<CameraScreen> {
           ),
         ),
 
-        // Bottom capture area
+        // Bottom capture area with Gallery Upload button
         Positioned(
           bottom: 40,
           left: 0,
@@ -408,50 +457,148 @@ class _CameraScreenState extends State<CameraScreen> {
                   return const SizedBox.shrink();
                 },
               ),
-              // Capture button
+
+              // Capture button + Gallery upload button row
               Consumer<ScanProvider>(
                 builder: (context, scanProvider, _) {
                   final isScanning = scanProvider.isScanning;
-                  return GestureDetector(
-                    onTap: isScanning ? null : _handleCapture,
-                    child: AnimatedContainer(
-                      duration: const Duration(milliseconds: 200),
-                      width: 76,
-                      height: 76,
-                      decoration: BoxDecoration(
-                        color: isScanning
-                            ? AppColors.primaryDark.withValues(alpha: 0.5)
-                            : AppColors.primaryDark,
-                        shape: BoxShape.circle,
-                        border: Border.all(
-                          color: Colors.white,
-                          width: 4,
-                        ),
-                        boxShadow: const [
-                          BoxShadow(
-                            color: Color(0x40000000),
-                            blurRadius: 12,
-                            offset: Offset(0, 4),
-                          ),
-                        ],
-                      ),
-                      child: isScanning
-                          ? const Padding(
-                              padding: EdgeInsets.all(22),
-                              child: CircularProgressIndicator(
-                                strokeWidth: 3,
-                                valueColor: AlwaysStoppedAnimation<Color>(
-                                    Colors.white),
-                              ),
-                            )
-                          : const Icon(
-                              Icons.camera_alt,
-                              color: Colors.white,
-                              size: 34,
+                  return Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                    crossAxisAlignment: CrossAxisAlignment.center,
+                    children: [
+                      // Gallery Upload Button (left)
+                      GestureDetector(
+                        onTap: isScanning ? null : _handleGalleryUpload,
+                        child: Container(
+                          width: 54,
+                          height: 54,
+                          decoration: BoxDecoration(
+                            color: Colors.white.withValues(alpha: 0.15),
+                            shape: BoxShape.circle,
+                            border: Border.all(
+                              color: Colors.white.withValues(alpha: 0.4),
+                              width: 1.5,
                             ),
-                    ),
+                          ),
+                          child: Icon(
+                            Icons.photo_library_rounded,
+                            color: isScanning
+                                ? Colors.white.withValues(alpha: 0.3)
+                                : Colors.white,
+                            size: 26,
+                          ),
+                        ),
+                      ),
+
+                      // Capture Button (center)
+                      GestureDetector(
+                        onTap: isScanning ? null : _handleCapture,
+                        child: AnimatedContainer(
+                          duration: const Duration(milliseconds: 200),
+                          width: 76,
+                          height: 76,
+                          decoration: BoxDecoration(
+                            color: isScanning
+                                ? AppColors.primaryDark.withValues(alpha: 0.5)
+                                : AppColors.primaryDark,
+                            shape: BoxShape.circle,
+                            border: Border.all(
+                              color: Colors.white,
+                              width: 4,
+                            ),
+                            boxShadow: const [
+                              BoxShadow(
+                                color: Color(0x40000000),
+                                blurRadius: 12,
+                                offset: Offset(0, 4),
+                              ),
+                            ],
+                          ),
+                          child: isScanning
+                              ? const Padding(
+                                  padding: EdgeInsets.all(22),
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 3,
+                                    valueColor: AlwaysStoppedAnimation<Color>(
+                                        Colors.white),
+                                  ),
+                                )
+                              : const Icon(
+                                  Icons.camera_alt,
+                                  color: Colors.white,
+                                  size: 34,
+                                ),
+                        ),
+                      ),
+
+                      // Flash toggle (right)
+                      GestureDetector(
+                        onTap: () {
+                          if (_controller != null && _controller!.value.isInitialized) {
+                            final currentFlash = _controller!.value.flashMode;
+                            _controller!.setFlashMode(
+                              currentFlash == FlashMode.off ? FlashMode.torch : FlashMode.off,
+                            );
+                            setState(() {});
+                          }
+                        },
+                        child: Container(
+                          width: 54,
+                          height: 54,
+                          decoration: BoxDecoration(
+                            color: Colors.white.withValues(alpha: 0.15),
+                            shape: BoxShape.circle,
+                            border: Border.all(
+                              color: Colors.white.withValues(alpha: 0.4),
+                              width: 1.5,
+                            ),
+                          ),
+                          child: Icon(
+                            (_controller != null &&
+                                    _controller!.value.isInitialized &&
+                                    _controller!.value.flashMode == FlashMode.torch)
+                                ? Icons.flash_on
+                                : Icons.flash_off,
+                            color: Colors.white,
+                            size: 26,
+                          ),
+                        ),
+                      ),
+                    ],
                   );
                 },
+              ),
+
+              const SizedBox(height: 12),
+
+              // "Upload from Gallery" text button
+              GestureDetector(
+                onTap: () {
+                  final scanProvider = context.read<ScanProvider>();
+                  if (!scanProvider.isScanning) _handleGalleryUpload();
+                },
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+                  decoration: BoxDecoration(
+                    color: Colors.black.withValues(alpha: 0.4),
+                    borderRadius: BorderRadius.circular(16),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const Icon(Icons.file_upload_outlined, color: Colors.white, size: 16),
+                      const SizedBox(width: 6),
+                      Text(
+                        'Upload from Gallery',
+                        style: AppTextStyles.bodySmall.copyWith(
+                          color: Colors.white,
+                          fontSize: 13,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
               ),
             ],
           ),
@@ -491,6 +638,13 @@ class _CameraScreenState extends State<CameraScreen> {
             CustomButton(
               text: 'Grant Permission',
               onPressed: _checkPermission,
+            ),
+            const SizedBox(height: 16),
+            // Gallery upload alternative when camera is denied
+            CustomButton(
+              text: 'Upload from Gallery Instead',
+              variant: CustomButtonVariant.outlined,
+              onPressed: _handleGalleryUpload,
             ),
           ],
         ),
@@ -532,6 +686,13 @@ class _CameraScreenState extends State<CameraScreen> {
               onPressed: () async {
                 await _permissionService.openSettings();
               },
+            ),
+            const SizedBox(height: 16),
+            // Gallery upload alternative when camera is blocked
+            CustomButton(
+              text: 'Upload from Gallery Instead',
+              variant: CustomButtonVariant.outlined,
+              onPressed: _handleGalleryUpload,
             ),
           ],
         ),
