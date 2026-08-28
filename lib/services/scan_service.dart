@@ -45,7 +45,7 @@ class ScanService {
     final plantIdApiKey = dotenv.env['PLANTID_API_KEY'] ?? '';
     final plantNetApiKey = dotenv.env['PLANTNET_API_KEY'] ?? '';
 
-    // Strip EXIF metadata in a separate isolate to avoid UI jank & location exposure
+    // Strip EXIF metadata & optimize resolution in a separate isolate to avoid UI jank
     final strippedBytes = await compute(_stripExifIsolate, imageBytes);
     final base64Image = base64Encode(strippedBytes);
 
@@ -612,10 +612,24 @@ Return ONLY a JSON object matching this exact structure:
     return '$plantName${scientificName.isNotEmpty && scientificName != 'Unknown Plant' ? ' ($scientificName)' : ''} is a botanical species widely appreciated for its distinctive foliage and natural environmental benefits.$altNames';
   }
 
-  /// Strip EXIF metadata from image bytes.
+  /// Preprocesses image bytes: strips EXIF location metadata, preserves aspect ratio,
+  /// and optimizes resolution (max 1280px dimension) for fast, accurate vision transformer inference.
   static Uint8List _stripExifIsolate(Uint8List bytes) {
     final decoded = img.decodeImage(bytes);
     if (decoded == null) return bytes;
-    return Uint8List.fromList(img.encodeJpg(decoded, quality: 90));
+
+    img.Image processed = decoded;
+
+    // Resize image if max dimension exceeds 1280px (preserves aspect ratio)
+    const maxDimension = 1280;
+    if (decoded.width > maxDimension || decoded.height > maxDimension) {
+      if (decoded.width >= decoded.height) {
+        processed = img.copyResize(decoded, width: maxDimension);
+      } else {
+        processed = img.copyResize(decoded, height: maxDimension);
+      }
+    }
+
+    return Uint8List.fromList(img.encodeJpg(processed, quality: 88));
   }
 }
