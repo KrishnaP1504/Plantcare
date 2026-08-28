@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+﻿import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:provider/provider.dart';
 import '../../core/constants/app_colors.dart';
@@ -7,13 +7,7 @@ import '../../core/constants/app_text_styles.dart';
 import '../../services/onboarding_service.dart';
 import '../../widgets/custom_button.dart';
 
-/// Welcome screen for first-time users.
-///
-/// Matches screenshot: cream background, green circle accent top-left,
-/// centered leaf icon, "Plant Care" title, tagline, "Get Started →" button.
-///
-/// After tapping "Get Started", marks onboarding as seen and explicitly
-/// navigates to /login. Does NOT rely on router refreshListenable for this.
+/// Welcome screen for first-time users featuring the official Plantcare app logo.
 class OnboardingScreen extends StatelessWidget {
   const OnboardingScreen({super.key});
 
@@ -46,19 +40,25 @@ class OnboardingScreen extends StatelessWidget {
               ),
               child: Column(
                 children: [
-                  SizedBox(height: screenHeight * 0.2),
-                  // App icon — dark green rounded square with leaf
-                  Container(
-                    width: 100,
-                    height: 100,
-                    decoration: BoxDecoration(
-                      color: AppColors.primaryDark,
-                      borderRadius: BorderRadius.circular(24),
-                    ),
-                    child: const Icon(
-                      Icons.eco,
-                      size: 50,
-                      color: AppColors.textOnPrimary,
+                  SizedBox(height: screenHeight * 0.18),
+                  // Official Plantcare Logo
+                  Image.asset(
+                    'assets/images/app_logo.png',
+                    width: 150,
+                    height: 150,
+                    fit: BoxFit.contain,
+                    errorBuilder: (_, __, ___) => Container(
+                      width: 100,
+                      height: 100,
+                      decoration: BoxDecoration(
+                        color: AppColors.primaryDark,
+                        borderRadius: BorderRadius.circular(24),
+                      ),
+                      child: const Icon(
+                        Icons.eco,
+                        size: 50,
+                        color: AppColors.textOnPrimary,
+                      ),
                     ),
                   ),
                   const SizedBox(height: 32),
@@ -82,9 +82,7 @@ class OnboardingScreen extends StatelessWidget {
                     text: 'Get Started  →',
                     variant: CustomButtonVariant.outlined,
                     onPressed: () async {
-                      // Mark onboarding as seen
                       await context.read<OnboardingService>().markSeen();
-                      // Explicit navigation — not relying on refreshListenable
                       if (context.mounted) {
                         context.go('/login');
                       }
