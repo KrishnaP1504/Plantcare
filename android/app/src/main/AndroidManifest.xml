@@ -1,6 +1,11 @@
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+﻿<manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <!-- Camera permission for plant scanning -->
     <uses-permission android:name="android.permission.CAMERA" />
+
+    <!-- Photo library / media permissions for uploading plant photos from gallery -->
+    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="32" />
+    <uses-permission android:name="android.permission.READ_MEDIA_IMAGES" />
+
     <application
         android:label="plantcare"
         android:name="${applicationName}"
