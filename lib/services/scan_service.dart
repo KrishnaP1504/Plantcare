@@ -44,11 +44,10 @@ bool _isValidPlantName(String? name) {
 
 /// Handles plant scan/identification & health assessment via Gemini Vision API (Primary),
 /// Plant.id (Kindwise) API v3, and Pl@ntNet API.
+///
+/// Disease detection is FULLY DYNAMIC — only the AI models decide if a plant is diseased.
+/// There is NO static/hardcoded/pixel-based disease assignment anywhere in this service.
 class ScanService {
-  /// Identify or diagnose a plant from an image.
-  ///
-  /// Accepts single leaf, leaf close-up, flower, fruit, stem, or whole plant photos.
-  /// Uses Google Gemini 1.5 Flash Multimodal Vision API as the primary engine.
   Future<DiagnosisModel> identify({
     required Uint8List imageBytes,
     required ScanMode mode,
@@ -59,31 +58,26 @@ class ScanService {
       'plantId is required for diagnose mode',
     );
 
-    // Read sensitive API keys from environment variables
     final geminiApiKey = dotenv.env['GEMINI_API_KEY'] ?? '';
     final plantIdApiKey = dotenv.env['PLANTID_API_KEY'] ?? '';
     final plantNetApiKey = dotenv.env['PLANTNET_API_KEY'] ?? '';
 
-    // Strip EXIF metadata & optimize resolution in a separate isolate to avoid UI jank
+    // Strip EXIF metadata & optimize resolution in a separate isolate
     final strippedBytes = await compute(_stripExifIsolate, imageBytes);
     final base64Image = base64Encode(strippedBytes);
 
-    // ─────────────────────────────────────────────────────────────────────────
-    // ── 1. PRIMARY ENGINE: Google Gemini 1.5 Flash Vision Multimodal API ──
-    // ─────────────────────────────────────────────────────────────────────────
+    // ── 1. PRIMARY: Google Gemini 3.7 Flash Vision API ──
     if (geminiApiKey.isNotEmpty) {
       try {
         final result = await _tryGemini(geminiApiKey, base64Image, mode);
         if (result != null) return result;
       } catch (e) {
         if (e is NotAPlantException) rethrow;
-        debugPrint('Gemini Vision API Error (falling back to Plant.id): $e');
+        debugPrint('Gemini Vision API Error: $e');
       }
     }
 
-    // ─────────────────────────────────────────────────────────────────────────
-    // ── 2. FALLBACK 1: Plant.id (Kindwise) API v3 ──
-    // ─────────────────────────────────────────────────────────────────────────
+    // ── 2. FALLBACK: Plant.id (Kindwise) API v3 ──
     if (plantIdApiKey.isNotEmpty) {
       try {
         final result = await _tryPlantId(plantIdApiKey, base64Image, mode);
@@ -94,29 +88,25 @@ class ScanService {
       }
     }
 
-    // ─────────────────────────────────────────────────────────────────────────
-    // ── 3. FALLBACK 2: Pl@ntNet API Request (Multi-Organ Support) ──
-    // ─────────────────────────────────────────────────────────────────────────
+    // ── 3. FALLBACK: Pl@ntNet API (identification only, no disease detection) ──
     if (plantNetApiKey.isNotEmpty) {
       try {
-        final result = await _tryPlantNet(plantNetApiKey, strippedBytes, mode, imageBytes);
+        final result = await _tryPlantNet(plantNetApiKey, strippedBytes);
         if (result != null) return result;
       } catch (e) {
         if (e is NotAPlantException) rethrow;
-        debugPrint('Pl@ntNet API fallback error: $e');
+        debugPrint('Pl@ntNet API Error: $e');
       }
     }
 
-    // ─────────────────────────────────────────────────────────────────────────
-    // ── 4. All APIs failed — throw instead of returning fake data ──
-    // ─────────────────────────────────────────────────────────────────────────
+    // ── 4. All APIs failed ──
     throw const NotAPlantException(
       'Could not identify this plant. Please try again with a clearer photo showing the full leaf or flower.',
     );
   }
 
   // ═══════════════════════════════════════════════════════════════════════════
-  // Gemini Vision API
+  // Gemini Vision API — returns DYNAMIC disease results from AI model only
   // ═══════════════════════════════════════════════════════════════════════════
   Future<DiagnosisModel?> _tryGemini(String apiKey, String base64Image, ScanMode mode) async {
     final geminiUrl = dotenv.env['GEMINI_API_URL'] ??
@@ -141,9 +131,21 @@ RULES:
 3. ONLY set "is_plant" to false if the image contains NO plant at all (e.g. a car, shoe, person).
 4. For "confidence", return YOUR actual certainty as a decimal (0.30 to 0.99). Do NOT default to 0.95.
 5. For "description", write 2-3 sentences about the plant's characteristics, origin, and common uses.
-6. If the plant shows disease symptoms (spots, mold, yellowing, wilting, pest damage), set "is_healthy" to false and fill the "diseases" array.
 
-Respond with ONLY this JSON (no markdown, no extra text):
+CRITICAL DISEASE DETECTION RULES:
+6. ONLY report diseases if you can clearly see visible symptoms in the image such as:
+   - Brown/black spots or lesions on leaves
+   - White powdery coating on leaf surfaces
+   - Yellow mosaic patterns or chlorosis
+   - Wilting, curling, or deformed leaves
+   - Mold, mildew, or fungal growth
+   - Pest damage (holes, webbing, insects)
+   - Rust-colored pustules
+7. If the plant looks healthy with normal green/colored foliage and NO visible disease symptoms, you MUST set "is_healthy" to true and return an EMPTY diseases array [].
+8. Do NOT guess or assume diseases. Only report what you can actually SEE in the image.
+9. Natural leaf coloring (red, purple, pink variegation in ornamental plants like Coleus) is NOT a disease.
+
+Respond with ONLY this JSON:
 {
   "is_plant": true,
   "plant_name": "Coleus",
@@ -193,7 +195,7 @@ Respond with ONLY this JSON (no markdown, no extra text):
     final plantName = parsed['plant_name'] as String?;
     final scientificName = parsed['scientific_name'] as String?;
 
-    // VALIDATION: If Gemini returned generic garbage, fall through to next API
+    // If Gemini returned generic garbage, fall through to next API
     if (!_isValidPlantName(plantName)) {
       debugPrint('Gemini returned generic name "$plantName", falling through to Plant.id');
       return null;
@@ -203,6 +205,7 @@ Respond with ONLY this JSON (no markdown, no extra text):
     final description = parsed['description'] as String?;
     final isHealthy = parsed['is_healthy'] as bool? ?? true;
 
+    // DYNAMIC diseases — only populated if the AI model detected real symptoms
     List<DiseaseResult> diseases = [];
     if (!isHealthy) {
       final diseaseList = parsed['diseases'] as List<dynamic>?;
@@ -220,12 +223,8 @@ Respond with ONLY this JSON (no markdown, no extra text):
           return DiseaseResult(
             name: name,
             probability: prob,
-            description: desc.isNotEmpty
-                ? desc
-                : _lookupDiseaseDetails(name, prob).description,
-            treatments: treatments.isNotEmpty
-                ? treatments
-                : _lookupDiseaseDetails(name, prob).treatments,
+            description: desc.isNotEmpty ? desc : 'Disease detected by AI visual analysis.',
+            treatments: treatments.isNotEmpty ? treatments : const ['Consult a local plant nursery or agricultural extension for treatment advice.'],
           );
         }).toList();
       }
@@ -246,7 +245,7 @@ Respond with ONLY this JSON (no markdown, no extra text):
   }
 
   // ═══════════════════════════════════════════════════════════════════════════
-  // Plant.id (Kindwise) API v3
+  // Plant.id (Kindwise) API v3 — DYNAMIC disease detection from API response
   // ═══════════════════════════════════════════════════════════════════════════
   Future<DiagnosisModel?> _tryPlantId(String apiKey, String base64Image, ScanMode mode) async {
     final plantIdUrl = dotenv.env['PLANTID_API_URL'] ??
@@ -313,12 +312,9 @@ Respond with ONLY this JSON (no markdown, no extra text):
       plantDescription ??= _getPlantDescription(plantName, scientificName, commonNames, null);
     }
 
-    // VALIDATION: If Plant.id also returned garbage, return null to try next
-    if (!_isValidPlantName(plantName)) {
-      debugPrint('Plant.id returned generic name "$plantName", falling through');
-      return null;
-    }
+    if (!_isValidPlantName(plantName)) return null;
 
+    // DYNAMIC disease detection from Plant.id health assessment API
     final diseaseObj = (result?['disease'] ?? result?['health_assessment']) as Map<String, dynamic>?;
     final isHealthyObj = diseaseObj?['is_healthy'] ?? result?['is_healthy'];
     final isHealthyProb = (isHealthyObj is Map
@@ -330,8 +326,14 @@ Respond with ONLY this JSON (no markdown, no extra text):
         result?['diseases']) as List<dynamic>?;
 
     List<DiseaseResult> diseases = [];
-    if (isHealthyProb < 0.60 && diseaseSuggestions != null && diseaseSuggestions.isNotEmpty) {
-      diseases = diseaseSuggestions.map((d) {
+    // Only add diseases if the API's health probability says it's actually unhealthy
+    if (isHealthyProb < 0.50 && diseaseSuggestions != null && diseaseSuggestions.isNotEmpty) {
+      diseases = diseaseSuggestions.where((d) {
+        final dMap = d as Map<String, dynamic>;
+        final dProb = (dMap['probability'] as num?)?.toDouble() ?? 0.0;
+        // Only include diseases with > 30% probability from the API
+        return dProb > 0.30;
+      }).map((d) {
         final dMap = d as Map<String, dynamic>;
         final dName = dMap['name'] as String? ?? 'Plant Disease';
         final dProb = (dMap['probability'] as num?)?.toDouble() ?? 0.80;
@@ -358,17 +360,12 @@ Respond with ONLY this JSON (no markdown, no extra text):
           }
         }
 
-        if (dDesc != null && dDesc.isNotEmpty) {
-          return DiseaseResult(
-            name: dName,
-            probability: dProb,
-            description: dDesc,
-            treatments: treatmentList.isNotEmpty
-                ? treatmentList
-                : _lookupDiseaseDetails(dName, dProb).treatments,
-          );
-        }
-        return _lookupDiseaseDetails(dName, dProb);
+        return DiseaseResult(
+          name: dName,
+          probability: dProb,
+          description: (dDesc != null && dDesc.isNotEmpty) ? dDesc : 'Disease detected by Plant.id health assessment.',
+          treatments: treatmentList.isNotEmpty ? treatmentList : const ['Consult a local plant nursery for treatment advice.'],
+        );
       }).toList();
     }
 
@@ -385,11 +382,9 @@ Respond with ONLY this JSON (no markdown, no extra text):
   }
 
   // ═══════════════════════════════════════════════════════════════════════════
-  // Pl@ntNet API
+  // Pl@ntNet API — identification only, NO disease detection
   // ═══════════════════════════════════════════════════════════════════════════
-  Future<DiagnosisModel?> _tryPlantNet(
-    String apiKey, Uint8List strippedBytes, ScanMode mode, Uint8List originalBytes,
-  ) async {
+  Future<DiagnosisModel?> _tryPlantNet(String apiKey, Uint8List strippedBytes) async {
     final plantNetUrl = dotenv.env['PLANTNET_API_URL'] ??
         'https://my-api.plantnet.org/v2/identify/all';
     final uri = Uri.parse('$plantNetUrl?api-key=$apiKey');
@@ -411,7 +406,6 @@ Respond with ONLY this JSON (no markdown, no extra text):
 
     final data = jsonDecode(response.body) as Map<String, dynamic>;
     final results = data['results'] as List<dynamic>?;
-
     if (results == null || results.isEmpty) return null;
 
     final topResult = results.first as Map<String, dynamic>;
@@ -422,8 +416,7 @@ Respond with ONLY this JSON (no markdown, no extra text):
     }
 
     final species = topResult['species'] as Map<String, dynamic>?;
-    final scientificName =
-        species?['scientificNameWithoutAuthor'] as String? ?? '';
+    final scientificName = species?['scientificNameWithoutAuthor'] as String? ?? '';
     final commonNames = (species?['commonNames'] as List<dynamic>?)
         ?.map((e) => e.toString())
         .toList();
@@ -433,30 +426,23 @@ Respond with ONLY this JSON (no markdown, no extra text):
 
     if (!_isValidPlantName(plantName)) return null;
 
-    final diseases = _diagnosePlantDiseases(
-      mode: mode,
-      plantName: plantName,
-      scientificName: scientificName,
-      imageBytes: originalBytes,
-    );
-
+    // Pl@ntNet does NOT do disease detection — return empty diseases
     return DiagnosisModel(
       id: 'scan_${DateTime.now().millisecondsSinceEpoch}',
       plantName: plantName,
       scientificName: scientificName,
       confidence: score,
       description: _getPlantDescription(plantName, scientificName, commonNames, null),
-      diseases: diseases,
+      diseases: const [], // No static diseases — Pl@ntNet only identifies species
       recommendations: _getSmartRecommendations(plantName),
       scannedAt: DateTime.now(),
     );
   }
 
   // ═══════════════════════════════════════════════════════════════════════════
-  // Helper Methods
+  // Helper Methods — NO static disease detection anywhere
   // ═══════════════════════════════════════════════════════════════════════════
 
-  /// Returns contextual care recommendations based on the identified plant.
   static List<String> _getSmartRecommendations(String plantName) {
     final lower = plantName.toLowerCase();
     if (lower.contains('coleus') || lower.contains('solenostemon')) {
@@ -494,131 +480,6 @@ Respond with ONLY this JSON (no markdown, no extra text):
     ];
   }
 
-  /// Vision pathology computer vision helper (used only for Pl@ntNet fallback).
-  static List<DiseaseResult> _diagnosePlantDiseases({
-    required ScanMode mode,
-    required String plantName,
-    required String scientificName,
-    required Uint8List imageBytes,
-  }) {
-    try {
-      final decoded = img.decodeImage(imageBytes);
-      if (decoded != null) {
-        int yellowOilSpotsCount = 0;
-        int darkLesionsCount = 0;
-        int whitePowderCount = 0;
-        int rustOrangeCount = 0;
-
-        final width = decoded.width;
-        final height = decoded.height;
-        final stepX = (width / 50).clamp(1, 100).toInt();
-        final stepY = (height / 50).clamp(1, 100).toInt();
-
-        for (int y = 0; y < height; y += stepY) {
-          for (int x = 0; x < width; x += stepX) {
-            final pixel = decoded.getPixel(x, y);
-            final r = pixel.r.toInt();
-            final g = pixel.g.toInt();
-            final b = pixel.b.toInt();
-
-            if (r > 130 && g > 130 && b < 100 && (r - b) > 50) {
-              yellowOilSpotsCount++;
-            } else if (r < 75 && g < 75 && b < 60) {
-              darkLesionsCount++;
-            } else if (r > 200 && g > 200 && b > 200) {
-              whitePowderCount++;
-            } else if (r > 160 && g >= 70 && g <= 130 && b < 60) {
-              rustOrangeCount++;
-            }
-          }
-        }
-
-        if (yellowOilSpotsCount > 15) {
-          return [_lookupDiseaseDetails('Downy Mildew', 0.92)];
-        } else if (darkLesionsCount > 35) {
-          return [_lookupDiseaseDetails('Anthracnose', 0.88)];
-        } else if (whitePowderCount > 30) {
-          return [_lookupDiseaseDetails('Powdery Mildew', 0.90)];
-        } else if (rustOrangeCount > 25) {
-          return [_lookupDiseaseDetails('Rust Disease', 0.87)];
-        }
-      }
-    } catch (e) {
-      debugPrint('Vision pathology analysis error: $e');
-    }
-    return const [];
-  }
-
-  /// Looks up real botanical disease pathology details.
-  static DiseaseResult _lookupDiseaseDetails(String diseaseName, double probability) {
-    final nameLower = diseaseName.toLowerCase();
-
-    if (nameLower.contains('downy') || nameLower.contains('plasmopara') || nameLower.contains('peronospora')) {
-      return DiseaseResult(
-        name: 'Downy Mildew',
-        probability: probability,
-        description: 'Downy Mildew is a serious oomycete fungal-like disease (Plasmopara viticola / Peronospora spp.) affecting foliage. It produces distinct yellowish translucent "oil-spot" lesions on leaf upper surfaces and downy mold growth on leaf undersides.',
-        treatments: const [
-          'Apply copper octanoate or copper hydroxide fungicides at first sign of yellow oil-spot lesions.',
-          'Use systemic bio-fungicides containing Bacillus amyloliquefaciens or Phosphorous acid sprays.',
-          'Prune lower leaves to improve canopy airflow and accelerate leaf drying.',
-          'Avoid overhead sprinkler irrigation; water directly to soil base early in the morning.',
-        ],
-      );
-    }
-
-    if (nameLower.contains('powdery mildew') || nameLower.contains('mildew')) {
-      return DiseaseResult(
-        name: 'Powdery Mildew',
-        probability: probability,
-        description: 'Powdery Mildew produces distinct white or grayish powdery dust patches on upper leaf surfaces, stems, and flower buds. Affected leaves turn yellow, curl, and drop prematurely.',
-        treatments: const [
-          'Prune dense inner growth to maximize air circulation and sunlight exposure.',
-          'Spray foliage with potassium bicarbonate or organic neem oil every 7 days.',
-          'Apply bio-fungicides or copper/sulfur sprays at first sign of white powder.',
-        ],
-      );
-    }
-
-    if (nameLower.contains('black spot') || nameLower.contains('septoria') || nameLower.contains('leaf spot')) {
-      return DiseaseResult(
-        name: 'Black Spot (Leaf Spot)',
-        probability: probability,
-        description: 'Black Spot produces dark circular or angular brown spots with yellow halos on foliage. In humid weather, spots enlarge and coalesce, causing premature leaf drop.',
-        treatments: const [
-          'Rake up and destroy all fallen infected leaves to prevent soil reinfection.',
-          'Avoid overhead sprinkler irrigation; water directly onto soil base.',
-          'Apply organic copper fungicide spray every 7-10 days during warm, wet periods.',
-        ],
-      );
-    }
-
-    if (nameLower.contains('rust')) {
-      return DiseaseResult(
-        name: 'Rust Disease',
-        probability: probability,
-        description: 'Plant Rust is identified by bright orange, yellow, rust-colored, or reddish-brown pustules on leaf undersides and stems.',
-        treatments: const [
-          'Remove and isolate heavily infected leaves immediately.',
-          'Dust affected plants with sulfur powder or spray with sulfur-based fungicide.',
-          'Ensure adequate plant spacing to keep humidity levels around leaves low.',
-        ],
-      );
-    }
-
-    return DiseaseResult(
-      name: 'Anthracnose',
-      probability: probability,
-      description: 'Anthracnose causes dark, water-soaked brown lesions on leaves with yellow halos. Spores spread rapidly during moist, warm weather.',
-      treatments: const [
-        'Prune and destroy infected leaves and stems.',
-        'Apply liquid copper sprays or sulfur powders weekly in early spring.',
-        'Apply Neem oil spray early as an organic multi-purpose fungicide every 7-14 days.',
-      ],
-    );
-  }
-
-  /// Species description helper.
   static String _getPlantDescription(
     String plantName,
     String scientificName,
@@ -656,15 +517,13 @@ Respond with ONLY this JSON (no markdown, no extra text):
     return '$plantName ($scientificName) is a botanical species known for its distinctive features and widely appreciated in gardens and homes.$altNames';
   }
 
-  /// Preprocesses image bytes: strips EXIF location metadata, preserves aspect ratio,
-  /// and optimizes resolution (max 1280px dimension) for fast, accurate vision inference.
+  /// Preprocesses image bytes: strips EXIF, preserves aspect ratio, optimizes resolution.
   static Uint8List _stripExifIsolate(Uint8List bytes) {
     final decoded = img.decodeImage(bytes);
     if (decoded == null) return bytes;
 
     img.Image processed = decoded;
 
-    // Resize image if max dimension exceeds 1280px (preserves aspect ratio)
     const maxDimension = 1280;
     if (decoded.width > maxDimension || decoded.height > maxDimension) {
       if (decoded.width >= decoded.height) {
