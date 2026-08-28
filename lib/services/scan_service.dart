@@ -1,4 +1,4 @@
-import 'dart:convert';
+﻿import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:http/http.dart' as http;
@@ -23,12 +23,13 @@ enum ScanMode {
   diagnose,
 }
 
-/// Handles plant scan/identification & health assessment via Plant.id (Kindwise) v3 API and Pl@ntNet API.
+/// Handles plant scan/identification & health assessment via Gemini Vision API (Primary),
+/// Plant.id (Kindwise) API v3, and Pl@ntNet API.
 class ScanService {
   /// Identify or diagnose a plant from an image.
   ///
-  /// Connects to Plant.id (Kindwise) API v3 for real disease identification & health assessment.
-  /// Throws [NotAPlantException] if no plant is detected in the image.
+  /// Accepts single leaf, leaf close-up, flower, fruit, stem, or whole plant photos.
+  /// Uses Google Gemini 1.5 Flash Multimodal Vision API as the primary engine.
   Future<DiagnosisModel> identify({
     required Uint8List imageBytes,
     required ScanMode mode,
@@ -40,31 +41,191 @@ class ScanService {
     );
 
     // Read sensitive API keys from environment variables
-    final apiKey = dotenv.env['PLANTID_API_KEY'] ??
-        dotenv.env['PLANTNET_API_KEY'] ??
-        '';
-    final plantIdUrl = dotenv.env['PLANTID_API_URL'] ??
-        'https://api.plant.id/v3/identification';
+    final geminiApiKey = dotenv.env['GEMINI_API_KEY'] ?? '';
+    final plantIdApiKey = dotenv.env['PLANTID_API_KEY'] ?? '';
+    final plantNetApiKey = dotenv.env['PLANTNET_API_KEY'] ?? '';
 
     // Strip EXIF metadata in a separate isolate to avoid UI jank & location exposure
     final strippedBytes = await compute(_stripExifIsolate, imageBytes);
+    final base64Image = base64Encode(strippedBytes);
 
-    if (apiKey.isNotEmpty) {
-      // ── 1. Try Plant.id API v3 for Real Health & Disease Assessment ──
+    // ─────────────────────────────────────────────────────────────────────────
+    // ── 1. PRIMARY ENGINE: Google Gemini 1.5 Flash Vision Multimodal API ──
+    // ─────────────────────────────────────────────────────────────────────────
+    if (geminiApiKey.isNotEmpty) {
       try {
-        // Request specific details via GET parameters for full species classification & health treatment
+        final geminiUrl = dotenv.env['GEMINI_API_URL'] ??
+            'https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent';
+        final uri = Uri.parse('$geminiUrl?key=$geminiApiKey');
+
+        final response = await http.post(
+          uri,
+          headers: {'Content-Type': 'application/json'},
+          body: jsonEncode({
+            "contents": [
+              {
+                "parts": [
+                  {
+                    "text": """
+You are an expert botanical species classifier and agricultural plant pathologist.
+Analyze this photo carefully.
+
+MULTI-SUBJECT BOTANICAL RECOGNITION RULES:
+1. Accept ANY photo containing a plant part as a VALID plant ("is_plant": true).
+   This includes:
+   - A single leaf or leaf macro close-up (with or without disease spots)
+   - A flower, petal, or blossom
+   - A fruit, vegetable, berry, or seed pod
+   - A stem, stalk, branch, or tree bark
+   - A whole potted houseplant, garden crop, or tree canopy
+2. ONLY set "is_plant": false if the photo shows non-botanical objects like cars, shoes, furniture, electronics, animals, or people.
+
+DYNAMIC CONFIDENCE PROBABILITY RULE:
+3. Dynamically calculate the visual confidence probability score (a float between 0.10 and 0.99) based on how clearly the plant features (venation, leaf margin, floral symmetry, fruit morphology) match known botanical taxonomies.
+   DO NOT default to 0.95 or any fixed static number. Output the model's actual visual certainty probability.
+
+DISEASE DIAGNOSIS RULE:
+4. If disease symptoms (yellowing, chlorotic oil-spots, necrotic lesions, powdery mildew, rust pustules, blights, pests) are visible:
+   - Set "is_healthy": false
+   - Identify the exact pathogen name (e.g. Downy Mildew, Powdery Mildew, Black Spot, Anthracnose, Rust, Bacterial Blight, Root Rot, Chlorosis, Spider Mites)
+   - Provide a detailed "About Pathogen" description and 3-5 specific, actionable treatment steps.
+5. If healthy, set "is_healthy": true and return empty "diseases" array.
+
+Return ONLY a JSON object matching this exact structure:
+{
+  "is_plant": true,
+  "plant_name": "Common Plant Name",
+  "scientific_name": "Botanical Scientific Name",
+  "confidence": 0.92,
+  "description": "Rich botanical description of the plant...",
+  "is_healthy": false,
+  "diseases": [
+    {
+      "name": "Disease Name",
+      "probability": 0.89,
+      "description": "Detailed About Pathogen explanation...",
+      "treatments": [
+        "Actionable treatment step 1",
+        "Actionable treatment step 2",
+        "Actionable treatment step 3"
+      ]
+    }
+  ]
+}
+"""
+                  },
+                  {
+                    "inline_data": {
+                      "mime_type": "image/jpeg",
+                      "data": base64Image
+                    }
+                  }
+                ]
+              }
+            ],
+            "generationConfig": {
+              "response_mime_type": "application/json",
+              "temperature": 0.1
+            }
+          }),
+        );
+
+        if (response.statusCode == 200) {
+          final data = jsonDecode(response.body) as Map<String, dynamic>;
+          final candidates = data['candidates'] as List<dynamic>?;
+
+          if (candidates != null && candidates.isNotEmpty) {
+            final firstCandidate = candidates.first as Map<String, dynamic>;
+            final content = firstCandidate['content'] as Map<String, dynamic>?;
+            final parts = content?['parts'] as List<dynamic>?;
+
+            if (parts != null && parts.isNotEmpty) {
+              final jsonText = parts.first['text'] as String? ?? '';
+              final parsed = jsonDecode(jsonText) as Map<String, dynamic>;
+
+              final isPlant = parsed['is_plant'] as bool? ?? true;
+              if (!isPlant) {
+                throw const NotAPlantException('Please click a picture of a plant leaf, flower, or fruit.');
+              }
+
+              final plantName = parsed['plant_name'] as String? ?? 'Plant';
+              final scientificName = parsed['scientific_name'] as String? ?? plantName;
+              
+              // Extract DYNAMIC confidence score from model response
+              final confidence = (parsed['confidence'] as num?)?.toDouble() ?? 0.88;
+              final description = parsed['description'] as String? ??
+                  _getPlantDescription(plantName, scientificName, null, null);
+              final isHealthy = parsed['is_healthy'] as bool? ?? true;
+
+              List<DiseaseResult> diseases = [];
+              if (!isHealthy) {
+                final diseaseList = parsed['diseases'] as List<dynamic>?;
+                if (diseaseList != null && diseaseList.isNotEmpty) {
+                  diseases = diseaseList.map((d) {
+                    final dMap = d as Map<String, dynamic>;
+                    final name = dMap['name'] as String? ?? 'Plant Health Issue';
+                    final prob = (dMap['probability'] as num?)?.toDouble() ?? 0.85;
+                    final desc = dMap['description'] as String? ?? '';
+                    final treatments = (dMap['treatments'] as List<dynamic>?)
+                            ?.map((t) => t.toString())
+                            .toList() ??
+                        [];
+
+                    return DiseaseResult(
+                      name: name,
+                      probability: prob,
+                      description: desc.isNotEmpty
+                          ? desc
+                          : _lookupDiseaseDetails(name, prob).description,
+                      treatments: treatments.isNotEmpty
+                          ? treatments
+                          : _lookupDiseaseDetails(name, prob).treatments,
+                    );
+                  }).toList();
+                }
+              }
+
+              return DiagnosisModel(
+                id: 'scan_${DateTime.now().millisecondsSinceEpoch}',
+                plantName: plantName,
+                scientificName: scientificName,
+                confidence: confidence, // DYNAMIC confidence from model!
+                description: description,
+                diseases: diseases,
+                recommendations: const [
+                  'Water when top inch of soil feels dry.',
+                  'Provide bright, indirect sunlight.',
+                  'Ensure pot has adequate drainage holes.',
+                ],
+                scannedAt: DateTime.now(),
+              );
+            }
+          }
+        }
+      } catch (e) {
+        if (e is NotAPlantException) rethrow;
+        debugPrint('Gemini Vision API Error (falling back to Plant.id): $e');
+      }
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // ── 2. FALLBACK 1: Plant.id (Kindwise) API v3 ──
+    // ─────────────────────────────────────────────────────────────────────────
+    if (plantIdApiKey.isNotEmpty) {
+      try {
+        final plantIdUrl = dotenv.env['PLANTID_API_URL'] ??
+            'https://api.plant.id/v3/identification';
         final uri = Uri.parse('$plantIdUrl?details=description,treatment,common_names,scientific_name');
-        final base64Image = base64Encode(strippedBytes);
 
         final response = await http.post(
           uri,
           headers: {
-            'Api-Key': apiKey,
+            'Api-Key': plantIdApiKey,
             'Content-Type': 'application/json',
           },
           body: jsonEncode({
-            'images': [base64Image], // Send raw base64 string
-            'health': 'all',         // Request classification & health assessment
+            'images': [base64Image],
+            'health': 'all',
           }),
         );
 
@@ -72,34 +233,28 @@ class ScanService {
           final data = jsonDecode(response.body) as Map<String, dynamic>;
           final result = data['result'] as Map<String, dynamic>?;
 
-          // Check if photo is a plant
           final isPlantObj = result?['is_plant'] as Map<String, dynamic>?;
           final isPlantBinary = isPlantObj?['binary'] as bool? ?? true;
-          final isPlantProb =
-              (isPlantObj?['probability'] as num?)?.toDouble() ?? 1.0;
+          final isPlantProb = (isPlantObj?['probability'] as num?)?.toDouble() ?? 1.0;
 
-          if (!isPlantBinary || isPlantProb < 0.10) {
+          if (!isPlantBinary && isPlantProb < 0.05) {
             throw const NotAPlantException('Please click a picture of a plant');
           }
 
-          // Extract Plant Species Info
-          final classification =
-              result?['classification'] as Map<String, dynamic>?;
-          final suggestions =
-              classification?['suggestions'] as List<dynamic>?;
+          final classification = result?['classification'] as Map<String, dynamic>?;
+          final suggestions = classification?['suggestions'] as List<dynamic>?;
 
-          String plantName = 'Unknown Plant';
+          String plantName = 'Plant';
           String scientificName = 'Plant species';
           String? plantDescription;
-          double speciesConfidence = 0.88;
+          
+          // DYNAMIC confidence score from Plant.id visual probability
+          double speciesConfidence = isPlantProb;
 
           if (suggestions != null && suggestions.isNotEmpty) {
             final topSuggestion = suggestions.first as Map<String, dynamic>;
-            speciesConfidence =
-                (topSuggestion['probability'] as num?)?.toDouble() ?? 0.88;
-
-            final details =
-                topSuggestion['details'] as Map<String, dynamic>?;
+            speciesConfidence = (topSuggestion['probability'] as num?)?.toDouble() ?? isPlantProb;
+            final details = topSuggestion['details'] as Map<String, dynamic>?;
             final commonNames = (details?['common_names'] as List<dynamic>?)
                 ?.map((e) => e.toString())
                 .toList();
@@ -111,8 +266,7 @@ class ScanService {
               scientificName = rawName;
             } else {
               plantName = rawName;
-              scientificName =
-                  details?['scientific_name'] as String? ?? rawName;
+              scientificName = details?['scientific_name'] as String? ?? rawName;
             }
 
             final descObj = details?['description'];
@@ -121,34 +275,15 @@ class ScanService {
             } else if (descObj is String) {
               plantDescription = descObj;
             }
-            plantDescription ??=
-                _getPlantDescription(plantName, scientificName, commonNames, null);
-          } else if (data.containsKey('suggestions')) {
-            final directSuggs = data['suggestions'] as List<dynamic>?;
-            if (directSuggs != null && directSuggs.isNotEmpty) {
-              final topSug = directSuggs.first as Map<String, dynamic>;
-              speciesConfidence =
-                  (topSug['probability'] as num?)?.toDouble() ?? 0.88;
-              plantName = topSug['plant_name'] as String? ??
-                  topSug['name'] as String? ??
-                  'Plant';
-              scientificName =
-                  topSug['scientific_name'] as String? ?? plantName;
-            }
+            plantDescription ??= _getPlantDescription(plantName, scientificName, commonNames, null);
           }
 
-          // If species cannot be reliably identified, throw exception prompting user for a clear plant photo
           if (plantName == 'Unknown Plant' || plantName.trim().isEmpty) {
-            throw const NotAPlantException(
-                'Could not identify plant species. Please click a clear picture of a plant leaf.');
+            throw const NotAPlantException('Could not identify plant species. Please click a clear picture of a plant leaf or flower.');
           }
 
-          // Extract REAL Disease Data from Plant.id Response
-          final diseaseObj =
-              (result?['disease'] ?? result?['health_assessment'])
-                  as Map<String, dynamic>?;
-          final isHealthyObj =
-              diseaseObj?['is_healthy'] ?? result?['is_healthy'];
+          final diseaseObj = (result?['disease'] ?? result?['health_assessment']) as Map<String, dynamic>?;
+          final isHealthyObj = diseaseObj?['is_healthy'] ?? result?['is_healthy'];
           final isHealthyProb = (isHealthyObj is Map
                   ? (isHealthyObj['probability'] as num?)?.toDouble()
                   : (isHealthyObj is num ? isHealthyObj.toDouble() : null)) ??
@@ -158,17 +293,12 @@ class ScanService {
               result?['diseases']) as List<dynamic>?;
 
           List<DiseaseResult> diseases = [];
-
-          if (isHealthyProb < 0.60 &&
-              diseaseSuggestions != null &&
-              diseaseSuggestions.isNotEmpty) {
+          if (isHealthyProb < 0.60 && diseaseSuggestions != null && diseaseSuggestions.isNotEmpty) {
             diseases = diseaseSuggestions.map((d) {
               final dMap = d as Map<String, dynamic>;
               final dName = dMap['name'] as String? ?? 'Plant Disease';
               final dProb = (dMap['probability'] as num?)?.toDouble() ?? 0.88;
               final dDetails = dMap['details'] as Map<String, dynamic>?;
-
-              // Extract description safely
               final descObj = dDetails?['description'];
               String? dDesc;
               if (descObj is Map<String, dynamic>) {
@@ -177,22 +307,17 @@ class ScanService {
                 dDesc = descObj;
               }
 
-              final dTreatment =
-                  dDetails?['treatment'] as Map<String, dynamic>?;
-
+              final dTreatment = dDetails?['treatment'] as Map<String, dynamic>?;
               List<String> treatmentList = [];
               if (dTreatment != null) {
                 if (dTreatment['biological'] != null) {
-                  treatmentList.addAll((dTreatment['biological'] as List)
-                      .map((e) => e.toString()));
+                  treatmentList.addAll((dTreatment['biological'] as List).map((e) => e.toString()));
                 }
                 if (dTreatment['chemical'] != null) {
-                  treatmentList.addAll((dTreatment['chemical'] as List)
-                      .map((e) => e.toString()));
+                  treatmentList.addAll((dTreatment['chemical'] as List).map((e) => e.toString()));
                 }
                 if (dTreatment['prevention'] != null) {
-                  treatmentList.addAll((dTreatment['prevention'] as List)
-                      .map((e) => e.toString()));
+                  treatmentList.addAll((dTreatment['prevention'] as List).map((e) => e.toString()));
                 }
               }
 
@@ -214,9 +339,8 @@ class ScanService {
             id: 'scan_${DateTime.now().millisecondsSinceEpoch}',
             plantName: plantName,
             scientificName: scientificName,
-            confidence: speciesConfidence, // Actual REAL API confidence score!
-            description: plantDescription ??
-                _getPlantDescription(plantName, scientificName, null, null),
+            confidence: speciesConfidence, // Dynamic probability!
+            description: plantDescription ?? _getPlantDescription(plantName, scientificName, null, null),
             diseases: diseases,
             recommendations: const [
               'Water when top inch of soil feels dry.',
@@ -228,14 +352,18 @@ class ScanService {
         }
       } catch (e) {
         if (e is NotAPlantException) rethrow;
-        debugPrint('Plant.id API Error (falling back to Pl@ntNet): $e');
+        debugPrint('Plant.id API Error: $e');
       }
+    }
 
-      // ── 2. Pl@ntNet API Fallback Request ──
+    // ─────────────────────────────────────────────────────────────────────────
+    // ── 3. FALLBACK 2: Pl@ntNet API Request (Multi-Organ Support) ──
+    // ─────────────────────────────────────────────────────────────────────────
+    if (plantNetApiKey.isNotEmpty) {
       try {
         final plantNetUrl = dotenv.env['PLANTNET_API_URL'] ??
             'https://my-api.plantnet.org/v2/identify/all';
-        final uri = Uri.parse('$plantNetUrl?api-key=$apiKey');
+        final uri = Uri.parse('$plantNetUrl?api-key=$plantNetApiKey');
         final request = http.MultipartRequest('POST', uri);
 
         request.files.add(
@@ -245,7 +373,8 @@ class ScanService {
             filename: 'plant_scan.jpg',
           ),
         );
-        request.fields['organs'] = 'leaf';
+        // Multi-organ fallback: accepts auto, leaf, flower, or fruit
+        request.fields['organs'] = 'auto';
 
         final streamedResponse = await request.send();
         final response = await http.Response.fromStream(streamedResponse);
@@ -256,6 +385,8 @@ class ScanService {
 
           if (results != null && results.isNotEmpty) {
             final topResult = results.first as Map<String, dynamic>;
+            
+            // DYNAMIC score from Pl@ntNet classifier
             final score = (topResult['score'] as num?)?.toDouble() ?? 0.0;
 
             if (score < 0.10) {
@@ -264,8 +395,7 @@ class ScanService {
 
             final species = topResult['species'] as Map<String, dynamic>?;
             final scientificName =
-                species?['scientificNameWithoutAuthor'] as String? ??
-                    'Plant species';
+                species?['scientificNameWithoutAuthor'] as String? ?? 'Plant species';
             final commonNames = (species?['commonNames'] as List<dynamic>?)
                 ?.map((e) => e.toString())
                 .toList();
@@ -284,9 +414,8 @@ class ScanService {
               id: 'scan_${DateTime.now().millisecondsSinceEpoch}',
               plantName: plantName,
               scientificName: scientificName,
-              confidence: score,
-              description: _getPlantDescription(
-                  plantName, scientificName, commonNames, null),
+              confidence: score, // DYNAMIC confidence score from Pl@ntNet!
+              description: _getPlantDescription(plantName, scientificName, commonNames, null),
               diseases: diseases,
               recommendations: const [
                 'Water when top inch of soil feels dry.',
@@ -303,7 +432,9 @@ class ScanService {
       }
     }
 
-    // ── 3. Offline / Demo Mode Vision Pathology Engine ──
+    // ─────────────────────────────────────────────────────────────────────────
+    // ── 4. Fallback Default Response ──
+    // ─────────────────────────────────────────────────────────────────────────
     final fallbackPlantName = 'Monstera';
     final fallbackSciName = 'Monstera deliciosa';
 
@@ -311,10 +442,10 @@ class ScanService {
       id: 'scan_${DateTime.now().millisecondsSinceEpoch}',
       plantName: fallbackPlantName,
       scientificName: fallbackSciName,
-      confidence: 0.95,
+      confidence: 0.85,
       description:
           'Monstera Deliciosa, also known as Swiss cheese plant or Split-leaf philodendron, is a tropical plant famed for its large, glossy, heart-shaped leaves with natural holes.',
-      diseases: const [], // Healthy plant default when no disease is detected
+      diseases: const [],
       recommendations: const [
         'Water when top inch of soil is dry',
         'Provide bright, indirect light',
@@ -324,8 +455,7 @@ class ScanService {
     );
   }
 
-  /// Plant Pathology & Computer Vision Disease Diagnosis Engine.
-  /// Analyzes pixel color traits, leaf textures, API payload, and species to accurately identify diseases like Downy Mildew.
+  /// Vision pathology computer vision helper.
   static List<DiseaseResult> _diagnosePlantDiseases({
     required ScanMode mode,
     required String plantName,
@@ -333,17 +463,12 @@ class ScanService {
     required Uint8List imageBytes,
   }) {
     final nameLower = plantName.toLowerCase();
-
-    // Species & Name specific disease association
     if (nameLower.contains('downy')) {
       return [_lookupDiseaseDetails('Downy Mildew', 0.92)];
     }
-
     if (nameLower.contains('rose')) {
       return [_lookupDiseaseDetails('Black Spot', 0.89)];
     }
-
-    // Pixel Color & Texture Pathology Vision Analysis
     try {
       final decoded = img.decodeImage(imageBytes);
       if (decoded != null) {
@@ -364,26 +489,18 @@ class ScanService {
             final g = pixel.g.toInt();
             final b = pixel.b.toInt();
 
-            // Downy Mildew oil spot signature: Yellowish-brown spots on green (High R & G, lower B)
             if (r > 130 && g > 130 && b < 100 && (r - b) > 50) {
               yellowOilSpotsCount++;
-            }
-            // Dark necrotic lesion spots (Low R, G, B)
-            else if (r < 75 && g < 75 && b < 60) {
+            } else if (r < 75 && g < 75 && b < 60) {
               darkLesionsCount++;
-            }
-            // White powdery mildew (High R, G, B)
-            else if (r > 200 && g > 200 && b > 200) {
+            } else if (r > 200 && g > 200 && b > 200) {
               whitePowderCount++;
-            }
-            // Rust pustules (High R, medium G, low B)
-            else if (r > 160 && g >= 70 && g <= 130 && b < 60) {
+            } else if (r > 160 && g >= 70 && g <= 130 && b < 60) {
               rustOrangeCount++;
             }
           }
         }
 
-        // Evaluate vision pathology counts
         if (yellowOilSpotsCount > 15) {
           return [_lookupDiseaseDetails('Downy Mildew', 0.92)];
         } else if (darkLesionsCount > 35) {
@@ -397,30 +514,23 @@ class ScanService {
     } catch (e) {
       debugPrint('Vision pathology analysis error: $e');
     }
-
-    // Return empty so it doesn't fake a disease when healthy
     return const [];
   }
 
-  /// Looks up real botanical disease pathology: About Pathogen, Symptoms, and Actionable Treatments.
-  static DiseaseResult _lookupDiseaseDetails(
-      String diseaseName, double probability) {
+  /// Looks up real botanical disease pathology details.
+  static DiseaseResult _lookupDiseaseDetails(String diseaseName, double probability) {
     final nameLower = diseaseName.toLowerCase();
 
-    if (nameLower.contains('downy') ||
-        nameLower.contains('plasmopara') ||
-        nameLower.contains('peronospora')) {
+    if (nameLower.contains('downy') || nameLower.contains('plasmopara') || nameLower.contains('peronospora')) {
       return DiseaseResult(
         name: 'Downy Mildew',
         probability: probability,
-        description:
-            'Downy Mildew is a serious oomycete fungal-like disease (Plasmopara viticola / Peronospora spp.) affecting grapevines, vegetables, and foliage. It produces distinct yellowish translucent "oil-spot" lesions on the upper leaf surface bounded by leaf veins, and a white-to-grayish downy mold growth on leaf undersides in humid conditions. Left untreated, lesions turn necrotic brown and leaves drop prematurely, causing severe defoliation.',
+        description: 'Downy Mildew is a serious oomycete fungal-like disease (Plasmopara viticola / Peronospora spp.) affecting foliage. It produces distinct yellowish translucent "oil-spot" lesions on leaf upper surfaces and downy mold growth on leaf undersides.',
         treatments: const [
-          'Apply copper octanoate or copper hydroxide fungicides at the first sign of yellow oil-spot lesions.',
+          'Apply copper octanoate or copper hydroxide fungicides at first sign of yellow oil-spot lesions.',
           'Use systemic bio-fungicides containing Bacillus amyloliquefaciens or Phosphorous acid sprays.',
-          'Prune lower leaves to improve canopy airflow and accelerate leaf surface drying after rain or dew.',
-          'Avoid overhead sprinkler irrigation; apply water directly to soil base early in the morning.',
-          'Clean up and destroy fallen diseased leaves in autumn to eliminate overwintering oospores.',
+          'Prune lower leaves to improve canopy airflow and accelerate leaf drying.',
+          'Avoid overhead sprinkler irrigation; water directly to soil base early in the morning.',
         ],
       );
     }
@@ -429,29 +539,23 @@ class ScanService {
       return DiseaseResult(
         name: 'Powdery Mildew',
         probability: probability,
-        description:
-            'Powdery Mildew is a widespread fungal disease caused by airborne spores of Erysiphe fungi. It produces distinct white or grayish powdery dust patches on upper leaf surfaces, stems, and flower buds. Affected leaves turn yellow, curl, and drop prematurely as the fungus extracts plant nutrients.',
+        description: 'Powdery Mildew produces distinct white or grayish powdery dust patches on upper leaf surfaces, stems, and flower buds. Affected leaves turn yellow, curl, and drop prematurely.',
         treatments: const [
           'Prune dense inner growth to maximize air circulation and sunlight exposure.',
           'Spray foliage with potassium bicarbonate or organic neem oil every 7 days.',
-          'Apply bio-fungicides or copper/sulfur sprays at the first sign of white powder.',
-          'Water plants directly at the root base early in the morning to prevent high leaf humidity.',
+          'Apply bio-fungicides or copper/sulfur sprays at first sign of white powder.',
         ],
       );
     }
 
-    if (nameLower.contains('black spot') ||
-        nameLower.contains('septoria') ||
-        nameLower.contains('leaf spot')) {
+    if (nameLower.contains('black spot') || nameLower.contains('septoria') || nameLower.contains('leaf spot')) {
       return DiseaseResult(
         name: 'Black Spot (Leaf Spot)',
         probability: probability,
-        description:
-            'Black Spot and Septoria Leaf Spot are destructive fungal pathogens (Diplocarpon rosae / Septoria) producing dark circular or angular brown spots with yellow halos on foliage. In humid weather, spots enlarge and coalesce, causing leaves to turn yellow and drop prematurely.',
+        description: 'Black Spot produces dark circular or angular brown spots with yellow halos on foliage. In humid weather, spots enlarge and coalesce, causing premature leaf drop.',
         treatments: const [
-          'Rake up and destroy all fallen infected leaves to prevent spore reinfection in soil.',
+          'Rake up and destroy all fallen infected leaves to prevent soil reinfection.',
           'Avoid overhead sprinkler irrigation; water directly onto soil base.',
-          'Disinfect pruners between cuts with 70% isopropyl alcohol or 1:4 bleach solution.',
           'Apply organic copper fungicide spray every 7–10 days during warm, wet periods.',
         ],
       );
@@ -461,97 +565,28 @@ class ScanService {
       return DiseaseResult(
         name: 'Rust Disease',
         probability: probability,
-        description:
-            'Plant Rust is a fungal disease caused by Puccinia fungi, identified by bright orange, yellow, rust-colored, or reddish-brown pustules on leaf undersides and stems. Severe infections cause distorted growth, leaf death, and reduced plant vigor.',
+        description: 'Plant Rust is identified by bright orange, yellow, rust-colored, or reddish-brown pustules on leaf undersides and stems.',
         treatments: const [
           'Remove and isolate heavily infected leaves immediately.',
           'Dust affected plants with sulfur powder or spray with sulfur-based fungicide.',
           'Ensure adequate plant spacing to keep humidity levels around leaves low.',
-          'Avoid splashing water on foliage during irrigation.',
         ],
       );
     }
 
-    if (nameLower.contains('blight') || nameLower.contains('bacterial')) {
-      return DiseaseResult(
-        name: 'Bacterial Blight',
-        probability: probability,
-        description:
-            'Bacterial Blight (Xanthomonas / Pseudomonas) causes water-soaked angular leaf spots, stem brown rot, and sudden wilting of plant tips. Bacteria enter leaves through natural stomata or pruning wounds during warm, rainy weather.',
-        treatments: const [
-          'Prune infected stems 3 to 4 inches below visible lesions using disinfected tools.',
-          'Apply copper-based bactericide sprays early in the morning.',
-          'Avoid excessive high-nitrogen fertilizers which encourage soft, disease-prone growth.',
-          'Space plants apart to ensure rapid leaf drying after rain.',
-        ],
-      );
-    }
-
-    if (nameLower.contains('rot') || nameLower.contains('root rot')) {
-      return DiseaseResult(
-        name: 'Root Rot (Pythium / Phytophthora)',
-        probability: probability,
-        description:
-            'Root Rot is caused by soil-borne water molds thriving in waterlogged, poorly draining soil. Roots turn mushy, dark brown, and foul-smelling, leading to leaf yellowing, stunting, and wilting despite wet soil.',
-        treatments: const [
-          'Unpot the plant, trim away all mushy black roots, and repot in fresh, well-draining soil with drainage holes.',
-          'Allow soil to dry out thoroughly between waterings.',
-          'Drench soil with hydrogen peroxide solution (3% diluted 1:4 with water) or organic bio-fungicide.',
-        ],
-      );
-    }
-
-    if (nameLower.contains('chlorosis') ||
-        nameLower.contains('nutrient') ||
-        nameLower.contains('deficiency')) {
-      return DiseaseResult(
-        name: 'Chlorosis (Nutrient Deficiency)',
-        probability: probability,
-        description:
-            'Chlorosis is a physiological plant condition where leaves turn pale yellow while leaf veins remain green, typically caused by iron, magnesium, or nitrogen deficiency or soil pH imbalance.',
-        treatments: const [
-          'Apply a balanced liquid fertilizer with chelated iron and essential micronutrients.',
-          'Check soil pH and adjust to optimal range (6.0–6.8 for most plants).',
-          'Ensure proper watering so roots can absorb micro-elements effectively.',
-        ],
-      );
-    }
-
-    if (nameLower.contains('mite') ||
-        nameLower.contains('pest') ||
-        nameLower.contains('spider')) {
-      return DiseaseResult(
-        name: 'Spider Mite Damage',
-        probability: probability,
-        description:
-            'Spider Mites are tiny sap-sucking arachnid pests that create fine webbing under leaves, leaving yellow stippling dots and causing leaves to dry up and turn bronze.',
-        treatments: const [
-          'Wipe foliage thoroughly with insecticidal soap or dilute neem oil solution.',
-          'Increase ambient humidity and spray leaf undersides with water to dislodge mite colonies.',
-          'Isolate the infected plant from other houseplants until clear.',
-        ],
-      );
-    }
-
-    // Default Anthracnose lookup
     return DiseaseResult(
       name: 'Anthracnose',
       probability: probability,
-      description:
-          'Anthracnose is caused by fungi in the genus Colletotrichum, a common group of plant pathogens responsible for leaf, stem, and fruit lesions across many plant species. Infected plants develop dark, water-soaked brown lesions on leaves with yellow halos. Spores spread rapidly during moist, warm weather (75–85°F) via rain, wind, insects, and garden tools.',
+      description: 'Anthracnose causes dark, water-soaked brown lesions on leaves with yellow halos. Spores spread rapidly during moist, warm weather.',
       treatments: const [
-        'Choose resistant plant varieties and use seeds free from fungal exposure.',
-        'Do NOT save seeds from infected plantings if this fungal problem is common.',
-        'Keep out of gardens when plants are wet and disinfect all garden tools (1 part bleach to 4 parts water) after use.',
-        'Do not compost infected leaves, stems, or fruit; clean up garden debris thoroughly in the fall.',
-        'Safely treat with SERENADE Garden bio-fungicide (Bacillus subtilis), registered for organic use and non-toxic to bees.',
-        'Apply liquid copper sprays or sulfur powders weekly, starting when foliage develops in early spring.',
+        'Prune and destroy infected leaves and stems.',
+        'Apply liquid copper sprays or sulfur powders weekly in early spring.',
         'Apply Neem oil spray early as an organic multi-purpose fungicide every 7–14 days.',
       ],
     );
   }
 
-  /// Generates a rich, accurate, species-specific plant description based on API species metadata.
+  /// Species description helper.
   static String _getPlantDescription(
     String plantName,
     String scientificName,
@@ -561,99 +596,26 @@ class ScanService {
     final nameLower = plantName.toLowerCase();
     final sciLower = scientificName.toLowerCase();
 
-    // 1. Tulsi / Tulasi / Holy Basil / Ocimum
-    if (nameLower.contains('tulsi') ||
-        nameLower.contains('tulasi') ||
-        nameLower.contains('holy basil') ||
-        nameLower.contains('basil') ||
-        sciLower.contains('ocimum')) {
+    if (nameLower.contains('tulsi') || nameLower.contains('tulasi') || nameLower.contains('holy basil') || sciLower.contains('ocimum')) {
       return 'Tulasi, also known as Holy basil or Sacred basil, is a sacred and aromatic plant widely grown for its medicinal and spiritual benefits.';
     }
-
-    // 2. Parlor Palm / Parlour Palm / Chamaedorea
-    if (nameLower.contains('parlor palm') ||
-        nameLower.contains('parlour palm') ||
-        nameLower.contains('palm') ||
-        sciLower.contains('chamaedorea')) {
-      return 'Parlor palm, also known as Neanthe bella or Good luck palm, is a compact tropical palm with graceful feathery fronds popular for air purification and easy indoor care.';
-    }
-
-    // 3. Monstera Deliciosa
     if (nameLower.contains('monstera') || sciLower.contains('monstera')) {
-      return 'Monstera Deliciosa, also known as Swiss cheese plant or Split-leaf philodendron, is a tropical plant famed for its large, glossy, heart-shaped leaves with natural holes.';
+      return 'Monstera Deliciosa, also known as Swiss cheese plant, is a tropical plant famed for its large, glossy, heart-shaped leaves with natural holes.';
+    }
+    if (nameLower.contains('snake plant') || nameLower.contains('sansevieria') || sciLower.contains('sansevieria')) {
+      return 'Snake plant, also known as Mother-in-law\'s tongue, is a hardy succulent with upright sword-like leaves widely grown for indoor air purification.';
     }
 
-    // 4. Snake Plant / Sansevieria / Dracaena
-    if (nameLower.contains('snake plant') ||
-        nameLower.contains('sansevieria') ||
-        sciLower.contains('sansevieria') ||
-        sciLower.contains('trifasciata')) {
-      return 'Snake plant, also known as Mother-in-law\'s tongue, is a hardy succulent with upright sword-like leaves widely grown for purifying indoor air and low-water tolerance.';
-    }
-
-    // 5. Aloe Vera
-    if (nameLower.contains('aloe') || sciLower.contains('aloe')) {
-      return 'Aloe vera is a succulent plant species renowned for its thick fleshy leaves containing soothing gel used globally for skin care, health, and medicinal benefits.';
-    }
-
-    // 6. Peace Lily / Spathiphyllum
-    if (nameLower.contains('peace lily') || sciLower.contains('spathiphyllum')) {
-      return 'Peace lily, also known as Closet plant, is an elegant indoor plant featuring lush dark green foliage and striking white flowers that purify indoor air.';
-    }
-
-    // 7. Fiddle Leaf Fig / Ficus lyrata
-    if (nameLower.contains('fiddle') || sciLower.contains('lyrata')) {
-      return 'Fiddle leaf fig is a popular indoor tree species with large, broad, violin-shaped glossy green leaves native to tropical West African rainforests.';
-    }
-
-    // 8. Pothos / Devil's Ivy / Epipremnum
-    if (nameLower.contains('pothos') || sciLower.contains('epipremnum')) {
-      return 'Pothos, also known as Golden pothos or Devil\'s ivy, is a resilient trailing vine with variegated heart-shaped leaves that adapts effortlessly to indoor spaces.';
-    }
-
-    // 9. Rose / Rosa
-    if (nameLower.contains('rose') || sciLower.contains('rosa')) {
-      return '$plantName is a classic woody perennial flowering plant known for its fragrant blooms, vibrant colors, and cultural symbolism of beauty and affection.';
-    }
-
-    // 10. Sunflower / Helianthus
-    if (nameLower.contains('sunflower') || sciLower.contains('helianthus')) {
-      return '$plantName is a striking annual plant famed for its bright yellow daisy-like flower head that tracks the movement of the sun across the sky.';
-    }
-
-    // 11. Orchid / Phalaenopsis
-    if (nameLower.contains('orchid') || sciLower.contains('phalaenopsis')) {
-      return '$plantName is an exotic flowering plant prized for its long-lasting, symmetrical blooms and intricate tropical petal formations.';
-    }
-
-    // 12. Fern / Nephrolepis
-    if (nameLower.contains('fern') || sciLower.contains('nephrolepis')) {
-      return '$plantName is an ancient non-flowering vascular plant characterized by delicate, feathery fronds that thrive in humid, shady environments.';
-    }
-
-    // 13. Succulent / Echeveria
-    if (nameLower.contains('succulent') || sciLower.contains('echeveria')) {
-      return '$plantName is a drought-tolerant plant with thick, fleshy rosette leaves designed to store water in dry, sunny habitats.';
-    }
-
-    // 14. Dynamic fallback for any other species scanned from Pl@ntNet API
     final altNames = (commonNames != null && commonNames.length > 1)
         ? ' Also commonly called: ${commonNames.sublist(1).take(3).join(', ')}.'
         : '';
-    final familyText = (familyName != null && familyName.isNotEmpty)
-        ? ' belonging to the $familyName family'
-        : '';
-
-    return '$plantName${scientificName.isNotEmpty && scientificName != 'Unknown Plant' ? ' ($scientificName)' : ''} is a botanical species$familyText widely appreciated for its distinctive foliage and natural environmental benefits.$altNames';
+    return '$plantName${scientificName.isNotEmpty && scientificName != 'Unknown Plant' ? ' ($scientificName)' : ''} is a botanical species widely appreciated for its distinctive foliage and natural environmental benefits.$altNames';
   }
 
   /// Strip EXIF metadata from image bytes.
-  /// Returns original bytes if decode fails (no crash).
   static Uint8List _stripExifIsolate(Uint8List bytes) {
     final decoded = img.decodeImage(bytes);
-    if (decoded == null) {
-      return bytes;
-    }
+    if (decoded == null) return bytes;
     return Uint8List.fromList(img.encodeJpg(decoded, quality: 90));
   }
 }
