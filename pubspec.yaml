@@ -1,4 +1,4 @@
-name: plantcare
+﻿name: plantcare
 description: "AI-powered plant care and identification app"
 publish_to: 'none'
 version: 0.1.0+1
@@ -33,12 +33,6 @@ dependencies:
   # Runtime Permissions
   permission_handler: ^11.3.1
 
-  # SVG Support
-  flutter_svg: ^2.0.17
-
-  # Icons
-  iconsax_flutter: ^1.0.0+1
-
   # Image caching
   cached_network_image: ^3.4.1
 
@@ -48,13 +42,13 @@ dependencies:
   # Networking
   http: ^1.2.0
 
-  # Onboarding persistence (non-sensitive flags only)
+  # Onboarding persistence
   shared_preferences: ^2.3.5
 
-  # Secure token storage (Keychain/Keystore)
+  # Secure token storage
   flutter_secure_storage: ^9.2.4
 
-  # Image processing (EXIF stripping)
+  # Image processing
   image: ^4.5.3
   image_picker: ^1.2.3
 

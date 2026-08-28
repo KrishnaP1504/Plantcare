@@ -1,4 +1,4 @@
-import 'package:firebase_core/firebase_core.dart';
+﻿import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:provider/provider.dart';
@@ -12,7 +12,6 @@ import 'services/auth_service.dart';
 import 'services/onboarding_service.dart';
 import 'services/plant_service.dart';
 import 'services/scan_service.dart';
-import 'services/storage_service.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -33,23 +32,18 @@ void main() async {
     debugPrint('Firebase.initializeApp warning: $e');
   }
 
-  // Initialize local storage services
-  final storageService = StorageService();
+  // Initialize local onboarding state
   final onboardingService = OnboardingService();
   await onboardingService.init();
 
-  final authService = AuthService(storageService: storageService);
+  final authService = AuthService();
   final plantService = PlantService();
   final scanService = ScanService();
 
   runApp(
     MultiProvider(
       providers: [
-        // ── Services ──
         Provider<OnboardingService>.value(value: onboardingService),
-        Provider<StorageService>.value(value: storageService),
-
-        // ── Providers ──
         ChangeNotifierProvider(
           create: (_) => AuthProvider(authService: authService),
         ),

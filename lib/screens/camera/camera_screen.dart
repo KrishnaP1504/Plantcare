@@ -9,7 +9,6 @@ import '../../core/constants/app_colors.dart';
 import '../../core/constants/app_constants.dart';
 import '../../core/constants/app_text_styles.dart';
 import '../../providers/scan_provider.dart';
-import '../../services/permission_service.dart';
 import '../../services/scan_service.dart';
 import '../../widgets/custom_button.dart';
 
@@ -29,7 +28,6 @@ class CameraScreen extends StatefulWidget {
 }
 
 class _CameraScreenState extends State<CameraScreen> {
-  final PermissionService _permissionService = PermissionService();
   final ImagePicker _imagePicker = ImagePicker();
   CameraController? _controller;
   List<CameraDescription> _cameras = [];
@@ -54,7 +52,7 @@ class _CameraScreenState extends State<CameraScreen> {
   Future<void> _checkPermission() async {
     setState(() => _isCheckingPermission = true);
 
-    if (await _permissionService.isCameraGranted()) {
+    if (await Permission.camera.isGranted) {
       setState(() {
         _hasPermission = true;
         _isCheckingPermission = false;
@@ -63,7 +61,7 @@ class _CameraScreenState extends State<CameraScreen> {
       return;
     }
 
-    if (await _permissionService.isCameraPermanentlyDenied()) {
+    if (await Permission.camera.isPermanentlyDenied) {
       setState(() {
         _isPermanentlyDenied = true;
         _isCheckingPermission = false;
@@ -71,7 +69,7 @@ class _CameraScreenState extends State<CameraScreen> {
       return;
     }
 
-    final status = await _permissionService.requestCamera();
+    final status = await Permission.camera.request();
     setState(() {
       _hasPermission = status.isGranted;
       _isPermanentlyDenied = status.isPermanentlyDenied;
@@ -433,7 +431,7 @@ class _CameraScreenState extends State<CameraScreen> {
             const SizedBox(height: 32),
             CustomButton(
               text: isPermanent ? 'Open Settings' : 'Grant Permission',
-              onPressed: isPermanent ? _permissionService.openSettings : _checkPermission,
+              onPressed: isPermanent ? openAppSettings : _checkPermission,
             ),
             const SizedBox(height: 16),
             CustomButton(

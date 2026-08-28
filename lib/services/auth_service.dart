@@ -1,25 +1,25 @@
-import 'package:cloud_firestore/cloud_firestore.dart';
+﻿import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart' as fb_auth;
+import 'package:flutter/foundation.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:google_sign_in/google_sign_in.dart';
 import '../models/user_model.dart';
-import 'storage_service.dart';
 
 /// Handles authentication and user profile management using Firebase Auth & Firestore.
-///
-/// Stores user security credentials securely via FirebaseAuth and user profile metadata
-/// in the Firestore `users` collection.
 class AuthService {
-  final StorageService _storageService;
+  final FlutterSecureStorage _storage;
   final fb_auth.FirebaseAuth _firebaseAuth;
   final FirebaseFirestore _firestore;
 
   AuthService({
-    required StorageService storageService,
+    FlutterSecureStorage? storage,
     fb_auth.FirebaseAuth? firebaseAuth,
     FirebaseFirestore? firestore,
-  })  : _storageService = storageService,
+  })  : _storage = storage ?? const FlutterSecureStorage(),
         _firebaseAuth = firebaseAuth ?? fb_auth.FirebaseAuth.instance,
         _firestore = firestore ?? FirebaseFirestore.instance;
+
+  static const _tokenKey = 'auth_token';
 
   /// Attempt login with Firebase Auth email/password.
   Future<UserModel> login({
@@ -33,43 +33,35 @@ class AuthService {
       );
 
       final firebaseUser = credential.user;
-      if (firebaseUser == null) {
-        throw Exception('User authentication failed');
-      }
+      if (firebaseUser == null) throw Exception('User authentication failed');
 
-      // Save token securely
       final token = await firebaseUser.getIdToken();
-      if (token != null) {
-        await _storageService.saveToken(token);
-      }
+      if (token != null) await _storage.write(key: _tokenKey, value: token);
 
-      // Fetch profile from Firestore
       final userDoc = await _firestore.collection('users').doc(firebaseUser.uid).get();
-
       if (userDoc.exists && userDoc.data() != null) {
         return UserModel.fromJson(userDoc.data()!);
       }
 
-      // Return default user model if doc doesn't exist yet
-      return UserModel(
+      final defaultUser = UserModel(
         id: firebaseUser.uid,
-        fullName: firebaseUser.displayName ?? 'Plant Lover',
+        fullName: firebaseUser.displayName ?? email.split('@').first,
         username: email.split('@').first,
         email: email,
+        avatarUrl: firebaseUser.photoURL,
         level: 1,
         xp: 0,
-        avatarUrl: firebaseUser.photoURL,
       );
-    } on fb_auth.FirebaseAuthException catch (e) {
-      throw Exception(e.message ?? 'Firebase Login failed (${e.code})');
+      await _firestore.collection('users').doc(firebaseUser.uid).set(defaultUser.toJson());
+      return defaultUser;
     } catch (e) {
-      // Fallback for offline or unconfigured Firebase project
-      const mockToken = 'mock_firebase_token';
-      await _storageService.saveToken(mockToken);
+      if (e is fb_auth.FirebaseAuthException) rethrow;
+      final mockToken = 'mock_jwt_token_${DateTime.now().millisecondsSinceEpoch}';
+      await _storage.write(key: _tokenKey, value: mockToken);
       return UserModel(
-        id: 'firebase_user_001',
-        fullName: 'Krishna',
-        username: 'krishna',
+        id: 'user_${DateTime.now().millisecondsSinceEpoch}',
+        fullName: email.split('@').first,
+        username: email.split('@').first,
         email: email,
         level: 1,
         xp: 0,
@@ -77,7 +69,7 @@ class AuthService {
     }
   }
 
-  /// Register a new user account with Firebase Auth and store profile in Firestore.
+  /// Register a new user with full name, username, email, and password.
   Future<UserModel> register({
     required String fullName,
     required String username,
@@ -91,36 +83,30 @@ class AuthService {
       );
 
       final firebaseUser = credential.user;
-      if (firebaseUser == null) {
-        throw Exception('Registration failed');
-      }
+      if (firebaseUser == null) throw Exception('User registration failed');
 
       await firebaseUser.updateDisplayName(fullName);
 
-      final userModel = UserModel(
+      final newUser = UserModel(
         id: firebaseUser.uid,
         fullName: fullName,
-        username: username,
+        username: username.isNotEmpty ? username : email.split('@').first,
         email: email,
+        avatarUrl: firebaseUser.photoURL,
         level: 1,
         xp: 0,
       );
 
-      // Store user document in Firestore `users/{uid}`
-      await _firestore.collection('users').doc(firebaseUser.uid).set(userModel.toJson());
+      await _firestore.collection('users').doc(firebaseUser.uid).set(newUser.toJson());
 
       final token = await firebaseUser.getIdToken();
-      if (token != null) {
-        await _storageService.saveToken(token);
-      }
+      if (token != null) await _storage.write(key: _tokenKey, value: token);
 
-      return userModel;
-    } on fb_auth.FirebaseAuthException catch (e) {
-      throw Exception(e.message ?? 'Firebase Registration failed (${e.code})');
+      return newUser;
     } catch (e) {
-      // Fallback for offline or unconfigured Firebase project
-      const mockToken = 'mock_firebase_token';
-      await _storageService.saveToken(mockToken);
+      if (e is fb_auth.FirebaseAuthException) rethrow;
+      final mockToken = 'mock_jwt_token_${DateTime.now().millisecondsSinceEpoch}';
+      await _storage.write(key: _tokenKey, value: mockToken);
       return UserModel(
         id: 'user_${DateTime.now().millisecondsSinceEpoch}',
         fullName: fullName,
@@ -132,118 +118,133 @@ class AuthService {
     }
   }
 
-  /// Sign in with Google using GoogleSignIn SDK & Firebase Auth.
-  Future<UserModel> googleSignIn() async {
+  /// Authenticate with Google Sign-In and link with Firebase Auth.
+  Future<UserModel> signInWithGoogle() async {
     try {
-      final googleUser = await GoogleSignIn().signIn();
-      if (googleUser == null) {
-        throw Exception('Google sign-in cancelled by user');
-      }
+      final GoogleSignIn googleSignIn = GoogleSignIn(scopes: ['email', 'profile']);
+      final GoogleSignInAccount? googleUser = await googleSignIn.signIn();
 
-      final googleAuth = await googleUser.authentication;
-      final credential = fb_auth.GoogleAuthProvider.credential(
+      if (googleUser == null) throw Exception('Google sign in was cancelled');
+
+      final GoogleSignInAuthentication googleAuth = await googleUser.authentication;
+      final fb_auth.AuthCredential credential = fb_auth.GoogleAuthProvider.credential(
         accessToken: googleAuth.accessToken,
         idToken: googleAuth.idToken,
       );
 
       final userCredential = await _firebaseAuth.signInWithCredential(credential);
       final firebaseUser = userCredential.user;
+      if (firebaseUser == null) throw Exception('Google authentication failed');
 
-      if (firebaseUser == null) {
-        throw Exception('Firebase Google Auth failed');
+      final userDoc = await _firestore.collection('users').doc(firebaseUser.uid).get();
+
+      UserModel userModel;
+      if (userDoc.exists && userDoc.data() != null) {
+        userModel = UserModel.fromJson(userDoc.data()!);
+      } else {
+        userModel = UserModel(
+          id: firebaseUser.uid,
+          fullName: firebaseUser.displayName ?? googleUser.displayName ?? 'Plant Lover',
+          username: googleUser.email.split('@').first,
+          email: firebaseUser.email ?? googleUser.email,
+          avatarUrl: firebaseUser.photoURL ?? googleUser.photoUrl,
+          level: 1,
+          xp: 0,
+        );
+        await _firestore.collection('users').doc(firebaseUser.uid).set(userModel.toJson());
       }
-
-      final userModel = UserModel(
-        id: firebaseUser.uid,
-        fullName: firebaseUser.displayName ?? 'Plant Lover',
-        username: firebaseUser.email?.split('@').first ?? 'user',
-        email: firebaseUser.email ?? 'google@user.com',
-        level: 1,
-        xp: 0,
-        avatarUrl: firebaseUser.photoURL,
-      );
-
-      // Merge into Firestore
-      await _firestore.collection('users').doc(firebaseUser.uid).set(
-            userModel.toJson(),
-            SetOptions(merge: true),
-          );
 
       final token = await firebaseUser.getIdToken();
-      if (token != null) {
-        await _storageService.saveToken(token);
-      }
+      if (token != null) await _storage.write(key: _tokenKey, value: token);
 
       return userModel;
     } catch (e) {
-      // Fallback if SDK or Firebase config is uninitialized
-      const mockToken = 'mock_google_token';
-      await _storageService.saveToken(mockToken);
-      return const UserModel(
-        id: 'google_user_001',
-        fullName: 'Krishna',
-        username: 'krishna',
-        email: 'krishna@gmail.com',
+      if (e is fb_auth.FirebaseAuthException) rethrow;
+      final mockToken = 'mock_jwt_token_google_${DateTime.now().millisecondsSinceEpoch}';
+      await _storage.write(key: _tokenKey, value: mockToken);
+      return UserModel(
+        id: 'user_google_${DateTime.now().millisecondsSinceEpoch}',
+        fullName: 'Google User',
+        username: 'google_user',
+        email: 'user@gmail.com',
         level: 1,
         xp: 0,
       );
     }
+  }
+
+  Future<UserModel> googleSignIn() => signInWithGoogle();
+
+  /// Update user profile details in Firestore and Firebase Auth.
+  Future<UserModel> updateProfile({
+    required String uid,
+    String? name,
+    String? email,
+    String? avatarUrl,
+  }) async {
+    final Map<String, dynamic> updates = {};
+    if (name != null) updates['full_name'] = name;
+    if (email != null) updates['email'] = email;
+    if (avatarUrl != null) updates['avatar_url'] = avatarUrl;
+
+    if (updates.isNotEmpty) {
+      await _firestore.collection('users').doc(uid).set(updates, SetOptions(merge: true));
+    }
+
+    final updatedDoc = await _firestore.collection('users').doc(uid).get();
+    if (updatedDoc.exists && updatedDoc.data() != null) {
+      return UserModel.fromJson(updatedDoc.data()!);
+    }
+    throw Exception('Failed to load updated profile');
   }
 
   /// Send password reset email via Firebase Auth.
-  Future<void> forgotPassword({required String email}) async {
-    try {
-      await _firebaseAuth.sendPasswordResetEmail(email: email);
-    } on fb_auth.FirebaseAuthException catch (e) {
-      throw Exception(e.message ?? 'Password reset failed');
-    } catch (_) {
-      // Fallback
-      await Future.delayed(const Duration(seconds: 1));
-    }
+  Future<void> sendPasswordResetEmail({required String email}) async {
+    await _firebaseAuth.sendPasswordResetEmail(email: email);
   }
 
-  /// Check active Firebase Auth session or stored token.
-  Future<UserModel?> tryAutoLogin() async {
-    try {
-      final currentUser = _firebaseAuth.currentUser;
-      if (currentUser != null) {
-        final userDoc = await _firestore.collection('users').doc(currentUser.uid).get();
-        if (userDoc.exists && userDoc.data() != null) {
-          return UserModel.fromJson(userDoc.data()!);
-        }
-        return UserModel(
-          id: currentUser.uid,
-          fullName: currentUser.displayName ?? 'Plant Lover',
-          username: currentUser.email?.split('@').first ?? 'user',
-          email: currentUser.email ?? 'user@example.com',
-          level: 1,
-          xp: 0,
-          avatarUrl: currentUser.photoURL,
-        );
+  Future<void> forgotPassword({required String email}) => sendPasswordResetEmail(email: email);
+
+  /// Check if the user is currently authenticated via Firebase or stored token.
+  Future<bool> isAuthenticated() async {
+    if (_firebaseAuth.currentUser != null) return true;
+    final token = await _storage.read(key: _tokenKey);
+    return token != null && token.isNotEmpty;
+  }
+
+  /// Try auto login or get current user profile.
+  Future<UserModel?> tryAutoLogin() => getCurrentUser();
+
+  /// Retrieve the current authenticated user profile.
+  Future<UserModel?> getCurrentUser() async {
+    final firebaseUser = _firebaseAuth.currentUser;
+    if (firebaseUser != null) {
+      final doc = await _firestore.collection('users').doc(firebaseUser.uid).get();
+      if (doc.exists && doc.data() != null) {
+        return UserModel.fromJson(doc.data()!);
       }
-
-      final token = await _storageService.getToken();
-      if (token == null) return null;
-
-      return const UserModel(
-        id: 'user_001',
-        fullName: 'Krishna',
-        username: 'krishna',
-        email: 'krishna@example.com',
+      return UserModel(
+        id: firebaseUser.uid,
+        fullName: firebaseUser.displayName ?? firebaseUser.email?.split('@').first ?? 'User',
+        username: firebaseUser.email?.split('@').first ?? 'user',
+        email: firebaseUser.email ?? '',
+        avatarUrl: firebaseUser.photoURL,
         level: 1,
         xp: 0,
       );
-    } catch (_) {
-      return null;
     }
+    return null;
   }
 
-  /// Sign out from Firebase Auth and clear stored tokens.
+  /// Sign out the current user from Firebase Auth, Google Sign-In, and clear secure storage.
   Future<void> logout() async {
     try {
       await _firebaseAuth.signOut();
-      await GoogleSignIn().signOut();
-    } catch (_) {}
-    await _storageService.clearAll();
+      final GoogleSignIn googleSignIn = GoogleSignIn();
+      if (await googleSignIn.isSignedIn()) await googleSignIn.signOut();
+    } catch (e) {
+      debugPrint('Logout cleanup error: $e');
+    }
+    await _storage.deleteAll();
   }
 }
